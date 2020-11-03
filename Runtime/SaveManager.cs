@@ -52,6 +52,13 @@ namespace DynamicBox.SaveManagement
             }
         }
 
+        public bool FileExists (string dataName)
+        {
+            string fileName = _savingLocation + "/" + dataName + "." + _method.ToString ().ToLower ();
+
+            return File.Exists (fileName);
+        }
+
         public T LoadFromFile<T> (string dataName, T defaultValue)
         {
             T storedData = defaultValue;
