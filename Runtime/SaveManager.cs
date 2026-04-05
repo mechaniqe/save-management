@@ -1,5 +1,6 @@
 using System.IO;
-using System.Runtime.Serialization.Formatters.Binary;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
 using UnityEngine;
@@ -7,7 +8,7 @@ using UnityEngine;
 namespace DynamicBox.SaveManagement
 {
   /// <summary>
-  /// Handles reading and writing persistent save data using Binary, XML, or JSON serialization.
+  /// Handles reading and writing persistent save data using Encrypted, XML, or JSON serialization.
   /// All files are stored in <c>Application.persistentDataPath</c>.
   /// Subscribe to <see cref="OnError"/> to handle failures without polling return values.
   /// </summary>
@@ -15,6 +16,7 @@ namespace DynamicBox.SaveManagement
   {
     private string _savingLocation;
     private StorageMethod _method;
+    private string _encryptionKey;
 
     /// <summary>
     /// Fired whenever a save, load, or delete operation fails.
@@ -26,10 +28,19 @@ namespace DynamicBox.SaveManagement
     /// Creates a new SaveManager using the specified serialization format.
     /// </summary>
     /// <param name="method">The format used for all read and write operations.</param>
-    public SaveManager(StorageMethod method)
+    /// <param name="encryptionKey">
+    /// Required when using <see cref="StorageMethod.Encrypted"/>. Any string length is accepted —
+    /// the key is hashed to a fixed size internally. Keep this value consistent between saves and loads.
+    /// </param>
+    public SaveManager(StorageMethod method, string encryptionKey = null)
     {
+      if (method == StorageMethod.Encrypted && string.IsNullOrEmpty(encryptionKey))
+        throw new System.ArgumentException(
+          "An encryption key must be provided when using StorageMethod.Encrypted.", nameof(encryptionKey));
+
       _savingLocation = Application.persistentDataPath;
       _method = method;
+      _encryptionKey = encryptionKey;
     }
 
     // -------------------------------------------------------------------------
@@ -49,12 +60,9 @@ namespace DynamicBox.SaveManagement
       {
         switch (_method)
         {
-          case StorageMethod.Binary:
-            BinaryFormatter formatter = new BinaryFormatter();
-            using (FileStream stream = new FileStream(fileName, FileMode.Create, FileAccess.Write))
-            {
-              formatter.Serialize(stream, dataToStore);
-            }
+          case StorageMethod.Encrypted:
+            string plainJson = JsonUtility.ToJson(dataToStore, true);
+            File.WriteAllBytes(fileName, Encrypt(plainJson));
             break;
 
           case StorageMethod.XML:
@@ -93,12 +101,13 @@ namespace DynamicBox.SaveManagement
       {
         switch (_method)
         {
-          case StorageMethod.Binary:
-            BinaryFormatter formatter = new BinaryFormatter();
-            using (FileStream stream = new FileStream(fileName, FileMode.Create, FileAccess.Write))
+          case StorageMethod.Encrypted:
+            JsonEnvelope encEnvelope = new JsonEnvelope
             {
-              formatter.Serialize(stream, new SaveEnvelope<T> { Version = version, Data = dataToStore });
-            }
+              version = version,
+              data = JsonUtility.ToJson(dataToStore, true)
+            };
+            File.WriteAllBytes(fileName, Encrypt(JsonUtility.ToJson(encEnvelope, true)));
             break;
 
           case StorageMethod.XML:
@@ -127,7 +136,7 @@ namespace DynamicBox.SaveManagement
 
     /// <summary>
     /// Async version of <see cref="SaveToFile{T}(T,string)"/>. File I/O runs off the main thread.
-    /// Binary and XML serialization also runs off the main thread. JSON serialization remains
+    /// Encrypted and XML serialization also runs off the main thread. JSON serialization remains
     /// on the calling thread due to a Unity restriction on <c>JsonUtility</c>.
     /// </summary>
     /// <param name="dataToStore">The object to save. Must be serializable in the chosen format.</param>
@@ -140,15 +149,13 @@ namespace DynamicBox.SaveManagement
       {
         switch (_method)
         {
-          case StorageMethod.Binary:
-            await Task.Run(() =>
+          case StorageMethod.Encrypted:
+            string plainJson = JsonUtility.ToJson(dataToStore, true);
+            byte[] encryptedBytes = await Task.Run(() => Encrypt(plainJson));
+            using (FileStream fs = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
             {
-              BinaryFormatter formatter = new BinaryFormatter();
-              using (FileStream stream = new FileStream(fileName, FileMode.Create, FileAccess.Write))
-              {
-                formatter.Serialize(stream, dataToStore);
-              }
-            });
+              await fs.WriteAsync(encryptedBytes, 0, encryptedBytes.Length);
+            }
             break;
 
           case StorageMethod.XML:
@@ -210,12 +217,9 @@ namespace DynamicBox.SaveManagement
       {
         switch (_method)
         {
-          case StorageMethod.Binary:
-            using (Stream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-            {
-              BinaryFormatter formatter = new BinaryFormatter();
-              storedData = (T) formatter.Deserialize(stream);
-            }
+          case StorageMethod.Encrypted:
+            byte[] cipherData = File.ReadAllBytes(fileName);
+            storedData = JsonUtility.FromJson<T>(Decrypt(cipherData));
             break;
 
           case StorageMethod.XML:
@@ -258,13 +262,12 @@ namespace DynamicBox.SaveManagement
       {
         switch (_method)
         {
-          case StorageMethod.Binary:
-            using (Stream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-            {
-              BinaryFormatter formatter = new BinaryFormatter();
-              SaveEnvelope<T> envelope = (SaveEnvelope<T>) formatter.Deserialize(stream);
-              return envelope.Version == expectedVersion ? envelope.Data : defaultValue;
-            }
+          case StorageMethod.Encrypted:
+            byte[] cipherData = File.ReadAllBytes(fileName);
+            JsonEnvelope encEnvelope = JsonUtility.FromJson<JsonEnvelope>(Decrypt(cipherData));
+            if (encEnvelope.version != expectedVersion)
+              return defaultValue;
+            return JsonUtility.FromJson<T>(encEnvelope.data);
 
           case StorageMethod.XML:
             using (FileStream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -294,7 +297,8 @@ namespace DynamicBox.SaveManagement
 
     /// <summary>
     /// Async version of <see cref="LoadFromFile{T}(string,T)"/>. File I/O runs off the main thread.
-    /// JSON deserialization remains on the calling thread due to a Unity restriction on <c>JsonUtility</c>.
+    /// Encrypted decryption also runs off the main thread. JSON deserialization remains on the
+    /// calling thread due to a Unity restriction on <c>JsonUtility</c>.
     /// </summary>
     /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFileAsync{T}"/>.</param>
     /// <param name="defaultValue">Returned and written to disk when loading fails.</param>
@@ -306,15 +310,15 @@ namespace DynamicBox.SaveManagement
       {
         switch (_method)
         {
-          case StorageMethod.Binary:
-            return await Task.Run(() =>
+          case StorageMethod.Encrypted:
+            byte[] fileBytes;
+            using (FileStream fs = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true))
             {
-              using (Stream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-              {
-                BinaryFormatter formatter = new BinaryFormatter();
-                return (T) formatter.Deserialize(stream);
-              }
-            });
+              fileBytes = new byte[fs.Length];
+              await fs.ReadAsync(fileBytes, 0, fileBytes.Length);
+            }
+            string decryptedJson = await Task.Run(() => Decrypt(fileBytes));
+            return JsonUtility.FromJson<T>(decryptedJson);
 
           case StorageMethod.XML:
             return await Task.Run(() =>
@@ -348,6 +352,8 @@ namespace DynamicBox.SaveManagement
     /// <summary>
     /// Loads and deserializes a save file bundled in the project's Resources folder.
     /// Useful for shipping default data with the game. The file must be a <c>TextAsset</c>.
+    /// When using <see cref="StorageMethod.Encrypted"/>, the asset must have been encrypted
+    /// with the same key provided to this SaveManager.
     /// </summary>
     /// <param name="resourcePath">Path relative to a Resources folder, without extension.</param>
     public T LoadFromResources<T>(string resourcePath)
@@ -360,16 +366,12 @@ namespace DynamicBox.SaveManagement
 
         switch (_method)
         {
-          case StorageMethod.Binary:
-            using (Stream stream = new MemoryStream(textAsset.bytes))
-            {
-              BinaryFormatter formatter = new BinaryFormatter();
-              storedData = (T) formatter.Deserialize(stream);
-            }
+          case StorageMethod.Encrypted:
+            storedData = JsonUtility.FromJson<T>(Decrypt(textAsset.bytes));
             break;
 
           case StorageMethod.XML:
-            using (Stream stream = new MemoryStream(textAsset.bytes))
+            using (System.IO.Stream stream = new System.IO.MemoryStream(textAsset.bytes))
             {
               XmlSerializer serializer = new XmlSerializer(typeof(T));
               storedData = (T) serializer.Deserialize(stream);
@@ -447,8 +449,55 @@ namespace DynamicBox.SaveManagement
       OnError?.Invoke(saveEx);
     }
 
-    // Used internally for JSON versioning. JsonUtility cannot serialize open
-    // generic types, so T is serialized separately and stored as a string.
+    private byte[] Encrypt(string plainText)
+    {
+      using (Aes aes = Aes.Create())
+      {
+        aes.Key = DeriveKey(_encryptionKey);
+        aes.GenerateIV();
+
+        using (MemoryStream ms = new MemoryStream())
+        {
+          ms.Write(aes.IV, 0, aes.IV.Length);
+          using (CryptoStream cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
+          using (StreamWriter sw = new StreamWriter(cs))
+          {
+            sw.Write(plainText);
+          }
+          return ms.ToArray();
+        }
+      }
+    }
+
+    private string Decrypt(byte[] cipherData)
+    {
+      using (Aes aes = Aes.Create())
+      {
+        aes.Key = DeriveKey(_encryptionKey);
+
+        byte[] iv = new byte[16];
+        System.Array.Copy(cipherData, 0, iv, 0, 16);
+        aes.IV = iv;
+
+        using (MemoryStream ms = new MemoryStream(cipherData, 16, cipherData.Length - 16))
+        using (CryptoStream cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Read))
+        using (StreamReader sr = new StreamReader(cs))
+        {
+          return sr.ReadToEnd();
+        }
+      }
+    }
+
+    private byte[] DeriveKey(string key)
+    {
+      using (SHA256 sha = SHA256.Create())
+      {
+        return sha.ComputeHash(Encoding.UTF8.GetBytes(key));
+      }
+    }
+
+    // Used internally for JSON and Encrypted versioning. JsonUtility cannot serialize
+    // open generic types, so T is serialized separately and stored as a string.
     [System.Serializable]
     private class JsonEnvelope
     {
