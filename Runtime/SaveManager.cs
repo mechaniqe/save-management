@@ -54,7 +54,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="dataName">File name without extension. Used to identify the save file.</param>
     public void SaveToFile<T>(T dataToStore, string dataName)
     {
-      string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
       string tempPath = fileName + ".tmp";
 
       try
@@ -98,7 +98,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="version">Schema version to stamp on this save file.</param>
     public void SaveToFile<T>(T dataToStore, string dataName, int version)
     {
-      string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
       string tempPath = fileName + ".tmp";
 
       try
@@ -149,7 +149,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="dataName">File name without extension. Used to identify the save file.</param>
     public async Task SaveToFileAsync<T>(T dataToStore, string dataName)
     {
-      string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
       string tempPath = fileName + ".tmp";
 
       try
@@ -204,7 +204,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFile{T}(T,string)"/>.</param>
     public bool FileExists(string dataName)
     {
-      string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
 
       return File.Exists(fileName);
     }
@@ -220,7 +220,7 @@ namespace DynamicBox.SaveManagement
     {
       T storedData = defaultValue;
 
-      string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
 
       try
       {
@@ -265,7 +265,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="expectedVersion">The schema version this load call expects.</param>
     public T LoadFromFile<T>(string dataName, T defaultValue, int expectedVersion)
     {
-      string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
 
       try
       {
@@ -313,7 +313,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="defaultValue">Returned and written to disk when loading fails.</param>
     public async Task<T> LoadFromFileAsync<T>(string dataName, T defaultValue)
     {
-      string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
 
       try
       {
@@ -425,7 +425,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFile{T}(T,string)"/>.</param>
     public void RemoveData(string dataName)
     {
-      string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
 
       try
       {
