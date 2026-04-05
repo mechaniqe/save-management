@@ -1,6 +1,7 @@
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Serialization;
 using UnityEngine;
@@ -147,7 +148,7 @@ namespace DynamicBox.SaveManagement
     /// </summary>
     /// <param name="dataToStore">The object to save. Must be serializable in the chosen format.</param>
     /// <param name="dataName">File name without extension. Used to identify the save file.</param>
-    public async Task SaveToFileAsync<T>(T dataToStore, string dataName)
+    public async Task SaveToFileAsync<T>(T dataToStore, string dataName, CancellationToken ct = default)
     {
       string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
       string tempPath = fileName + ".tmp";
@@ -158,10 +159,10 @@ namespace DynamicBox.SaveManagement
         {
           case StorageMethod.Encrypted:
             string plainJson = JsonUtility.ToJson(dataToStore, true);
-            byte[] encryptedBytes = await Task.Run(() => Encrypt(plainJson));
+            byte[] encryptedBytes = await Task.Run(() => Encrypt(plainJson), ct);
             using (FileStream fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
             {
-              await fs.WriteAsync(encryptedBytes, 0, encryptedBytes.Length);
+              await fs.WriteAsync(encryptedBytes, 0, encryptedBytes.Length, ct);
             }
             break;
 
@@ -173,11 +174,14 @@ namespace DynamicBox.SaveManagement
               {
                 serializer.Serialize(stream, dataToStore);
               }
-            });
+            }, ct);
             break;
 
           case StorageMethod.JSON:
             string serializedData = JsonUtility.ToJson(dataToStore, true);
+            // StreamWriter.WriteAsync(string, CancellationToken) requires .NET 5+.
+            // On .NET Standard 2.0 (Unity) we check before opening the stream; the write itself is not interruptible.
+            ct.ThrowIfCancellationRequested();
             using (StreamWriter writer = new StreamWriter(tempPath, false))
             {
               await writer.WriteAsync(serializedData);
@@ -186,6 +190,10 @@ namespace DynamicBox.SaveManagement
         }
 
         CommitWrite(fileName);
+      }
+      catch (OperationCanceledException)
+      {
+        throw;
       }
       catch (System.Exception ex)
       {
@@ -311,7 +319,7 @@ namespace DynamicBox.SaveManagement
     /// </summary>
     /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFileAsync{T}"/>.</param>
     /// <param name="defaultValue">Returned and written to disk when loading fails.</param>
-    public async Task<T> LoadFromFileAsync<T>(string dataName, T defaultValue)
+    public async Task<T> LoadFromFileAsync<T>(string dataName, T defaultValue, CancellationToken ct = default)
     {
       string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
 
@@ -324,9 +332,9 @@ namespace DynamicBox.SaveManagement
             using (FileStream fs = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true))
             {
               fileBytes = new byte[fs.Length];
-              await fs.ReadAsync(fileBytes, 0, fileBytes.Length);
+              await fs.ReadAsync(fileBytes, 0, fileBytes.Length, ct);
             }
-            string decryptedJson = await Task.Run(() => Decrypt(fileBytes));
+            string decryptedJson = await Task.Run(() => Decrypt(fileBytes), ct);
             return JsonUtility.FromJson<T>(decryptedJson);
 
           case StorageMethod.XML:
@@ -337,9 +345,12 @@ namespace DynamicBox.SaveManagement
                 XmlSerializer serializer = new XmlSerializer(typeof(T));
                 return (T) serializer.Deserialize(stream);
               }
-            });
+            }, ct);
 
           case StorageMethod.JSON:
+            // StreamReader.ReadToEndAsync(CancellationToken) requires .NET 5+.
+            // On .NET Standard 2.0 (Unity) we check before opening the stream; the read itself is not interruptible.
+            ct.ThrowIfCancellationRequested();
             string serializedData;
             using (StreamReader reader = new StreamReader(fileName))
             {
@@ -347,6 +358,10 @@ namespace DynamicBox.SaveManagement
             }
             return JsonUtility.FromJson<T>(serializedData);
         }
+      }
+      catch (OperationCanceledException)
+      {
+        throw;
       }
       catch (System.Exception ex)
       {
