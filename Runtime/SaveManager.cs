@@ -207,6 +207,29 @@ namespace DynamicBox.SaveManagement
       }
     }
 
+    /// <summary>
+    /// Async version of <see cref="SaveToFile{T}(T,string,int)"/>.
+    /// </summary>
+    /// <param name="dataToStore">The object to save. Must be serializable by the active strategy.</param>
+    /// <param name="dataName">File name without extension. Used to identify the save file.</param>
+    /// <param name="version">Schema version to stamp on this save file.</param>
+    public async Task SaveToFileAsync<T>(T dataToStore, string dataName, int version, CancellationToken ct = default)
+    {
+      try
+      {
+        await _strategy.WriteVersionedAsync(BuildFilePath(dataName), dataToStore, version, ct);
+        if (_slotManager.ActiveSlot != null) _slotManager.UpdateSlotMeta();
+      }
+      catch (OperationCanceledException)
+      {
+        throw;
+      }
+      catch (System.Exception ex)
+      {
+        RaiseError("File writing error: ", dataName, SaveOperation.Save, ex);
+      }
+    }
+
     // -------------------------------------------------------------------------
     // Load
     // -------------------------------------------------------------------------
@@ -284,6 +307,34 @@ namespace DynamicBox.SaveManagement
       {
         RaiseError("File reading error: ", dataName, SaveOperation.Load, ex);
         await ResetDataAsync(dataName, defaultValue);
+        return defaultValue;
+      }
+    }
+
+    /// <summary>
+    /// Async version of <see cref="LoadFromFile{T}(string,T,int)"/>.
+    /// </summary>
+    /// <param name="dataName">File name without extension.</param>
+    /// <param name="defaultValue">Returned when loading fails or the version does not match.</param>
+    /// <param name="expectedVersion">The schema version this load call expects.</param>
+    public async Task<T> LoadFromFileAsync<T>(string dataName, T defaultValue, int expectedVersion, CancellationToken ct = default)
+    {
+      try
+      {
+        return await _strategy.ReadVersionedAsync<T>(BuildFilePath(dataName), expectedVersion, ct);
+      }
+      catch (VersionMismatchException)
+      {
+        return defaultValue;
+      }
+      catch (OperationCanceledException)
+      {
+        throw;
+      }
+      catch (System.Exception ex)
+      {
+        RaiseError("File reading error: ", dataName, SaveOperation.Load, ex);
+        await ResetDataVersionedAsync(dataName, defaultValue, expectedVersion, ct);
         return defaultValue;
       }
     }
@@ -389,6 +440,9 @@ namespace DynamicBox.SaveManagement
 
     private async Task ResetDataAsync<T>(string dataName, T defaultValue) =>
       await SaveToFileAsync(defaultValue, dataName);
+
+    private async Task ResetDataVersionedAsync<T>(string dataName, T defaultValue, int expectedVersion, CancellationToken ct) =>
+      await SaveToFileAsync(defaultValue, dataName, expectedVersion, ct);
 
     private void RaiseError(string message, string dataName, SaveOperation operation, System.Exception ex)
     {

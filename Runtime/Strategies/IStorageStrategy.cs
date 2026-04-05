@@ -14,7 +14,7 @@ namespace DynamicBox.SaveManagement
   /// </para>
   /// <para>
   /// Throw <see cref="VersionMismatchException"/> (not a general exception) from
-  /// <see cref="ReadVersioned{T}"/> when the on-disk version does not match — this
+  /// <see cref="ReadVersioned{T}"/> and <see cref="ReadVersionedAsync{T}"/> when the on-disk version does not match — this
   /// prevents <see cref="SaveManager"/> from firing <see cref="SaveManager.OnError"/>
   /// for an expected condition.
   /// </para>
@@ -44,6 +44,15 @@ namespace DynamicBox.SaveManagement
 
     /// <summary>Async version of <see cref="Read{T}"/>.</summary>
     Task<T> ReadAsync<T>(string path, CancellationToken ct);
+
+    /// <summary>Async version of <see cref="WriteVersioned{T}"/>.</summary>
+    Task WriteVersionedAsync<T>(string path, T data, int version, CancellationToken ct);
+
+    /// <summary>
+    /// Async version of <see cref="ReadVersioned{T}"/>.
+    /// Throws <see cref="VersionMismatchException"/> if the stored version differs from <paramref name="expectedVersion"/>.
+    /// </summary>
+    Task<T> ReadVersionedAsync<T>(string path, int expectedVersion, CancellationToken ct);
 
     /// <summary>
     /// Deserializes from raw bytes — used by <see cref="SaveManager.LoadFromResources{T}"/>.

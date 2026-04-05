@@ -33,6 +33,12 @@ namespace DynamicBox.SaveManagement
     public abstract Task<T> ReadAsync<T>(string path, CancellationToken ct);
 
     /// <inheritdoc/>
+    public abstract Task WriteVersionedAsync<T>(string path, T data, int version, CancellationToken ct);
+
+    /// <inheritdoc/>
+    public abstract Task<T> ReadVersionedAsync<T>(string path, int expectedVersion, CancellationToken ct);
+
+    /// <inheritdoc/>
     public abstract T ReadFromBytes<T>(byte[] rawBytes);
 
     /// <summary>

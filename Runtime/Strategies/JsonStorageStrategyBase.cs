@@ -61,6 +61,21 @@ namespace DynamicBox.SaveManagement
     }
 
     /// <inheritdoc/>
+    public override async Task WriteVersionedAsync<T>(string path, T data, int version, CancellationToken ct)
+    {
+      string json = JsonEnvelopeHelper.SerializeVersionedEnvelope(_jsonSerializer, data, version);
+      await WriteJsonToTempAsync(path, json, ct);
+      CommitWrite(path);
+    }
+
+    /// <inheritdoc/>
+    public override async Task<T> ReadVersionedAsync<T>(string path, int expectedVersion, CancellationToken ct)
+    {
+      string json = await ReadJsonFromFileAsync(path, ct);
+      return JsonEnvelopeHelper.DeserializeVersionedPayload<T>(_jsonSerializer, json, expectedVersion);
+    }
+
+    /// <inheritdoc/>
     public override T ReadFromBytes<T>(byte[] rawBytes) =>
       _jsonSerializer.Deserialize<T>(ReadJsonFromBytes(rawBytes));
 

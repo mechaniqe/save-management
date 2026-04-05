@@ -73,6 +73,18 @@ namespace DynamicBox.SaveManagement
     }
 
     /// <inheritdoc/>
+    public override Task WriteVersionedAsync<T>(string path, T data, int version, CancellationToken ct)
+    {
+      return Task.Run(() => WriteVersioned(path, data, version), ct);
+    }
+
+    /// <inheritdoc/>
+    public override Task<T> ReadVersionedAsync<T>(string path, int expectedVersion, CancellationToken ct)
+    {
+      return Task.Run(() => ReadVersioned<T>(path, expectedVersion), ct);
+    }
+
+    /// <inheritdoc/>
     public override T ReadFromBytes<T>(byte[] rawBytes)
     {
       XmlSerializer serializer = new XmlSerializer(typeof(T));
