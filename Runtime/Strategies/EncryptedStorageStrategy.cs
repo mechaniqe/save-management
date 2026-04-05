@@ -10,7 +10,7 @@ namespace DynamicBox.SaveManagement
   /// <see cref="IStorageStrategy"/> implementation that serializes data as JSON and encrypts
   /// it with AES-256. The encryption key is derived from an arbitrary string via SHA-256.
   /// </summary>
-  public class EncryptedStorageStrategy : StorageStrategyBase
+  public class EncryptedStorageStrategy : JsonStorageStrategyBase
   {
     private readonly string _encryptionKey;
 
@@ -28,44 +28,26 @@ namespace DynamicBox.SaveManagement
     /// <inheritdoc/>
     public override string FileExtension => "encrypted";
 
-    /// <inheritdoc/>
-    public override void Write<T>(string path, T data)
-    {
-      File.WriteAllBytes(path + ".tmp", Encrypt(SaveManager.JsonSerializer.Serialize(data)));
-      CommitWrite(path);
-    }
+    /// <inheritdoc cref="JsonStorageStrategyBase.WriteJsonToTemp"/>
+    protected override void WriteJsonToTemp(string path, string json) =>
+      File.WriteAllBytes(path + ".tmp", Encrypt(json));
 
-    /// <inheritdoc/>
-    public override void WriteVersioned<T>(string path, T data, int version)
-    {
-      File.WriteAllBytes(path + ".tmp", Encrypt(JsonEnvelopeHelper.SerializeVersionedEnvelope(data, version)));
-      CommitWrite(path);
-    }
+    /// <inheritdoc cref="JsonStorageStrategyBase.ReadJsonFromFile"/>
+    protected override string ReadJsonFromFile(string path) =>
+      Decrypt(File.ReadAllBytes(path));
 
-    /// <inheritdoc/>
-    public override T Read<T>(string path)
+    /// <inheritdoc cref="JsonStorageStrategyBase.WriteJsonToTempAsync"/>
+    protected override async Task WriteJsonToTempAsync(string path, string json, CancellationToken ct)
     {
-      return SaveManager.JsonSerializer.Deserialize<T>(Decrypt(File.ReadAllBytes(path)));
-    }
-
-    /// <inheritdoc/>
-    public override T ReadVersioned<T>(string path, int expectedVersion) =>
-      JsonEnvelopeHelper.DeserializeVersionedPayload<T>(Decrypt(File.ReadAllBytes(path)), expectedVersion);
-
-    /// <inheritdoc/>
-    public override async Task WriteAsync<T>(string path, T data, CancellationToken ct)
-    {
-      string plainJson = SaveManager.JsonSerializer.Serialize(data);
-      byte[] encryptedBytes = await Task.Run(() => Encrypt(plainJson), ct);
+      byte[] encryptedBytes = await Task.Run(() => Encrypt(json), ct);
       using (FileStream fs = new FileStream(path + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
       {
         await fs.WriteAsync(encryptedBytes, 0, encryptedBytes.Length, ct);
       }
-      CommitWrite(path);
     }
 
-    /// <inheritdoc/>
-    public override async Task<T> ReadAsync<T>(string path, CancellationToken ct)
+    /// <inheritdoc cref="JsonStorageStrategyBase.ReadJsonFromFileAsync"/>
+    protected override async Task<string> ReadJsonFromFileAsync(string path, CancellationToken ct)
     {
       byte[] fileBytes;
       using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true))
@@ -73,15 +55,11 @@ namespace DynamicBox.SaveManagement
         fileBytes = new byte[fs.Length];
         await fs.ReadAsync(fileBytes, 0, fileBytes.Length, ct);
       }
-      string decryptedJson = await Task.Run(() => Decrypt(fileBytes), ct);
-      return SaveManager.JsonSerializer.Deserialize<T>(decryptedJson);
+      return await Task.Run(() => Decrypt(fileBytes), ct);
     }
 
-    /// <inheritdoc/>
-    public override T ReadFromBytes<T>(byte[] rawBytes)
-    {
-      return SaveManager.JsonSerializer.Deserialize<T>(Decrypt(rawBytes));
-    }
+    /// <inheritdoc cref="JsonStorageStrategyBase.ReadJsonFromBytes"/>
+    protected override string ReadJsonFromBytes(byte[] rawBytes) => Decrypt(rawBytes);
 
     private byte[] Encrypt(string plainText)
     {

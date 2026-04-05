@@ -1,0 +1,84 @@
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace DynamicBox.SaveManagement
+{
+  /// <summary>
+  /// Base class for strategies that persist data as JSON on disk (plain text or encrypted bytes).
+  /// Uses <see cref="SaveManager.JsonSerializer"/> and <see cref="JsonEnvelopeHelper"/> for payloads;
+  /// subclasses define how the JSON string is encoded for storage and decoded back.
+  /// </summary>
+  public abstract class JsonStorageStrategyBase : StorageStrategyBase
+  {
+    /// <inheritdoc/>
+    public override void Write<T>(string path, T data)
+    {
+      string json = SaveManager.JsonSerializer.Serialize(data);
+      WriteJsonToTemp(path, json);
+      CommitWrite(path);
+    }
+
+    /// <inheritdoc/>
+    public override void WriteVersioned<T>(string path, T data, int version)
+    {
+      string json = JsonEnvelopeHelper.SerializeVersionedEnvelope(data, version);
+      WriteJsonToTemp(path, json);
+      CommitWrite(path);
+    }
+
+    /// <inheritdoc/>
+    public override T Read<T>(string path)
+    {
+      string json = ReadJsonFromFile(path);
+      return SaveManager.JsonSerializer.Deserialize<T>(json);
+    }
+
+    /// <inheritdoc/>
+    public override T ReadVersioned<T>(string path, int expectedVersion) =>
+      JsonEnvelopeHelper.DeserializeVersionedPayload<T>(ReadJsonFromFile(path), expectedVersion);
+
+    /// <inheritdoc/>
+    public override async Task WriteAsync<T>(string path, T data, CancellationToken ct)
+    {
+      string json = SaveManager.JsonSerializer.Serialize(data);
+      await WriteJsonToTempAsync(path, json, ct);
+      CommitWrite(path);
+    }
+
+    /// <inheritdoc/>
+    public override async Task<T> ReadAsync<T>(string path, CancellationToken ct)
+    {
+      string json = await ReadJsonFromFileAsync(path, ct);
+      return SaveManager.JsonSerializer.Deserialize<T>(json);
+    }
+
+    /// <inheritdoc/>
+    public override T ReadFromBytes<T>(byte[] rawBytes) =>
+      SaveManager.JsonSerializer.Deserialize<T>(ReadJsonFromBytes(rawBytes));
+
+    /// <summary>
+    /// Writes <paramref name="json"/> to <c>path + ".tmp"</c> using this strategy's encoding.
+    /// </summary>
+    protected abstract void WriteJsonToTemp(string path, string json);
+
+    /// <summary>
+    /// Reads the file at <paramref name="path"/> and returns the JSON string (decrypted if applicable).
+    /// </summary>
+    protected abstract string ReadJsonFromFile(string path);
+
+    /// <summary>
+    /// Async counterpart of <see cref="WriteJsonToTemp"/>.
+    /// </summary>
+    protected abstract Task WriteJsonToTempAsync(string path, string json, CancellationToken ct);
+
+    /// <summary>
+    /// Async counterpart of <see cref="ReadJsonFromFile"/>.
+    /// </summary>
+    protected abstract Task<string> ReadJsonFromFileAsync(string path, CancellationToken ct);
+
+    /// <summary>
+    /// Converts bundled resource bytes to a JSON string (e.g. UTF-8 text or decrypt).
+    /// </summary>
+    protected abstract string ReadJsonFromBytes(byte[] rawBytes);
+  }
+}
