@@ -55,6 +55,7 @@ namespace DynamicBox.SaveManagement
     public void SaveToFile<T>(T dataToStore, string dataName)
     {
       string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string tempPath = fileName + ".tmp";
 
       try
       {
@@ -62,12 +63,12 @@ namespace DynamicBox.SaveManagement
         {
           case StorageMethod.Encrypted:
             string plainJson = JsonUtility.ToJson(dataToStore, true);
-            File.WriteAllBytes(fileName, Encrypt(plainJson));
+            File.WriteAllBytes(tempPath, Encrypt(plainJson));
             break;
 
           case StorageMethod.XML:
             XmlSerializer serializer = new XmlSerializer(typeof(T));
-            using (FileStream stream = new FileStream(fileName, FileMode.Create, FileAccess.Write))
+            using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
             {
               serializer.Serialize(stream, dataToStore);
             }
@@ -75,9 +76,11 @@ namespace DynamicBox.SaveManagement
 
           case StorageMethod.JSON:
             string serializedData = JsonUtility.ToJson(dataToStore, true);
-            File.WriteAllText(fileName, serializedData);
+            File.WriteAllText(tempPath, serializedData);
             break;
         }
+
+        CommitWrite(fileName);
       }
       catch (System.Exception ex)
       {
@@ -96,6 +99,7 @@ namespace DynamicBox.SaveManagement
     public void SaveToFile<T>(T dataToStore, string dataName, int version)
     {
       string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string tempPath = fileName + ".tmp";
 
       try
       {
@@ -107,12 +111,12 @@ namespace DynamicBox.SaveManagement
               version = version,
               data = JsonUtility.ToJson(dataToStore, true)
             };
-            File.WriteAllBytes(fileName, Encrypt(JsonUtility.ToJson(encEnvelope, true)));
+            File.WriteAllBytes(tempPath, Encrypt(JsonUtility.ToJson(encEnvelope, true)));
             break;
 
           case StorageMethod.XML:
             XmlSerializer serializer = new XmlSerializer(typeof(SaveEnvelope<T>));
-            using (FileStream stream = new FileStream(fileName, FileMode.Create, FileAccess.Write))
+            using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
             {
               serializer.Serialize(stream, new SaveEnvelope<T> { Version = version, Data = dataToStore });
             }
@@ -124,9 +128,11 @@ namespace DynamicBox.SaveManagement
               version = version,
               data = JsonUtility.ToJson(dataToStore, true)
             };
-            File.WriteAllText(fileName, JsonUtility.ToJson(envelope, true));
+            File.WriteAllText(tempPath, JsonUtility.ToJson(envelope, true));
             break;
         }
+
+        CommitWrite(fileName);
       }
       catch (System.Exception ex)
       {
@@ -144,6 +150,7 @@ namespace DynamicBox.SaveManagement
     public async Task SaveToFileAsync<T>(T dataToStore, string dataName)
     {
       string fileName = _savingLocation + "/" + dataName + "." + _method.ToString().ToLower();
+      string tempPath = fileName + ".tmp";
 
       try
       {
@@ -152,7 +159,7 @@ namespace DynamicBox.SaveManagement
           case StorageMethod.Encrypted:
             string plainJson = JsonUtility.ToJson(dataToStore, true);
             byte[] encryptedBytes = await Task.Run(() => Encrypt(plainJson));
-            using (FileStream fs = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
+            using (FileStream fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
             {
               await fs.WriteAsync(encryptedBytes, 0, encryptedBytes.Length);
             }
@@ -162,7 +169,7 @@ namespace DynamicBox.SaveManagement
             await Task.Run(() =>
             {
               XmlSerializer serializer = new XmlSerializer(typeof(T));
-              using (FileStream stream = new FileStream(fileName, FileMode.Create, FileAccess.Write))
+              using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
               {
                 serializer.Serialize(stream, dataToStore);
               }
@@ -171,12 +178,14 @@ namespace DynamicBox.SaveManagement
 
           case StorageMethod.JSON:
             string serializedData = JsonUtility.ToJson(dataToStore, true);
-            using (StreamWriter writer = new StreamWriter(fileName, false))
+            using (StreamWriter writer = new StreamWriter(tempPath, false))
             {
               await writer.WriteAsync(serializedData);
             }
             break;
         }
+
+        CommitWrite(fileName);
       }
       catch (System.Exception ex)
       {
@@ -421,6 +430,9 @@ namespace DynamicBox.SaveManagement
       try
       {
         File.Delete(fileName);
+        string backupPath = fileName + ".bak";
+        if (File.Exists(backupPath))
+          File.Delete(backupPath);
       }
       catch (System.Exception ex)
       {
@@ -431,6 +443,21 @@ namespace DynamicBox.SaveManagement
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    private static void CommitWrite(string targetPath)
+    {
+      string tempPath = targetPath + ".tmp";
+      string backupPath = targetPath + ".bak";
+
+      if (File.Exists(targetPath))
+      {
+        if (File.Exists(backupPath))
+          File.Delete(backupPath);
+        File.Move(targetPath, backupPath);
+      }
+
+      File.Move(tempPath, targetPath);
+    }
 
     private void ResetData<T>(string dataName, T defaultValue)
     {
