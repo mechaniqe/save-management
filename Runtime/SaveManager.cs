@@ -62,11 +62,15 @@ namespace DynamicBox.SaveManagement
     /// <param name="jsonSerializer">
     /// Serializer for slot metadata and JSON-based formats. If null, <see cref="JsonSerializer"/> (static default) is used.
     /// </param>
-    public SaveManager(StorageMethod method, string encryptionKey = null, IJsonSerializer jsonSerializer = null)
+    /// <param name="persistentDataRoot">
+    /// Root directory for slot registry, slot folders, and save files (same role as <c>Application.persistentDataPath</c>).
+    /// If null or empty, <see cref="Application.persistentDataPath"/> is used. Pass a dedicated path for tests or tooling.
+    /// </param>
+    public SaveManager(StorageMethod method, string encryptionKey = null, IJsonSerializer jsonSerializer = null, string persistentDataRoot = null)
     {
       _jsonSerializer = jsonSerializer ?? JsonSerializer;
       _strategy = StorageStrategyFactory.Create(method, encryptionKey, _jsonSerializer);
-      _slotManager = new SlotManager(Application.persistentDataPath, _jsonSerializer);
+      _slotManager = new SlotManager(ResolvePersistentRoot(persistentDataRoot), _jsonSerializer);
     }
 
     /// <summary>
@@ -78,12 +82,18 @@ namespace DynamicBox.SaveManagement
     /// Serializer for slot registry and <c>slot.meta</c> files. If null, <see cref="JsonSerializer"/> (static default) is used.
     /// Use the same <see cref="IJsonSerializer"/> your JSON-based strategy was built with, if applicable.
     /// </param>
-    public SaveManager(IStorageStrategy strategy, IJsonSerializer jsonSerializer = null)
+    /// <param name="persistentDataRoot">
+    /// Root directory for slot registry, slot folders, and save files. If null or empty, <see cref="Application.persistentDataPath"/> is used.
+    /// </param>
+    public SaveManager(IStorageStrategy strategy, IJsonSerializer jsonSerializer = null, string persistentDataRoot = null)
     {
       _jsonSerializer = jsonSerializer ?? JsonSerializer;
       _strategy = strategy ?? throw new System.ArgumentNullException(nameof(strategy));
-      _slotManager = new SlotManager(Application.persistentDataPath, _jsonSerializer);
+      _slotManager = new SlotManager(ResolvePersistentRoot(persistentDataRoot), _jsonSerializer);
     }
+
+    private static string ResolvePersistentRoot(string persistentDataRoot) =>
+      string.IsNullOrEmpty(persistentDataRoot) ? Application.persistentDataPath : persistentDataRoot;
 
     // -------------------------------------------------------------------------
     // Slots
