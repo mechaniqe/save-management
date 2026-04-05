@@ -2,13 +2,18 @@
   "name": "net.dynamicbox.savemanagement",
   "displayName": "Save Manager",
   "version": "1.0.2",
-  "unity": "2019.3",
-  "description": "This package contains \"Save Manager\" we frequently use in our games.\n\nReach out to sahin@agilesolutions.az for extra details.",
+  "unity": "2019.2",
+  "description": "This package contains \"Save Manager\" we frequently use in our games.\n\nReach out to hello@dynamicbox.net for extra details.",
   "keywords": [
     "dynamicbox",
     "agile",
     "save",
     "saves"
   ],
-  "category": "Utils"
+  "category": "Utils",
+  "author": {
+    "name": "Dynamic Box",
+    "email": "hello@dynamicbox.net",
+    "url": "https://dynamicbox.net"
+  }
 }
