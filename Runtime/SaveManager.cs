@@ -53,21 +53,7 @@ namespace DynamicBox.SaveManagement
     /// </param>
     public SaveManager(StorageMethod method, string encryptionKey = null)
     {
-      switch (method)
-      {
-        case StorageMethod.Encrypted:
-          if (string.IsNullOrEmpty(encryptionKey))
-            throw new System.ArgumentException(
-              "An encryption key must be provided when using StorageMethod.Encrypted.", nameof(encryptionKey));
-          _strategy = new EncryptedStorageStrategy(encryptionKey);
-          break;
-        case StorageMethod.XML:
-          _strategy = new XmlStorageStrategy();
-          break;
-        default:
-          _strategy = new JsonStorageStrategy();
-          break;
-      }
+      _strategy = StorageStrategyFactory.Create(method, encryptionKey);
       _slotManager = new SlotManager(Application.persistentDataPath);
     }
 
