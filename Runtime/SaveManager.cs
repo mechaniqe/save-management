@@ -25,6 +25,27 @@ namespace DynamicBox.SaveManagement
     /// </summary>
     public event System.Action<SaveManagerException> OnError;
 
+    private static IJsonSerializer _jsonSerializer = new JsonUtilitySerializer();
+    private static bool _jsonSerializerAssigned;
+
+    /// <summary>
+    /// The JSON serializer used by all <see cref="SaveManager"/> instances.
+    /// Defaults to <see cref="JsonUtilitySerializer"/>. Set this once at startup,
+    /// before any save or load operations are performed.
+    /// Reassigning after saves exist on disk may make those saves unreadable with the new serializer.
+    /// </summary>
+    public static IJsonSerializer JsonSerializer
+    {
+      get => _jsonSerializer;
+      set
+      {
+        if (_jsonSerializerAssigned)
+          Debug.LogWarning("SaveManager.JsonSerializer was changed after already being assigned. Saves written with the previous serializer may no longer be readable.");
+        _jsonSerializer = value ?? throw new System.ArgumentNullException(nameof(value));
+        _jsonSerializerAssigned = true;
+      }
+    }
+
     /// <summary>
     /// Creates a new SaveManager using the specified serialization format.
     /// </summary>
@@ -63,7 +84,7 @@ namespace DynamicBox.SaveManagement
         switch (_method)
         {
           case StorageMethod.Encrypted:
-            string plainJson = JsonUtility.ToJson(dataToStore, true);
+            string plainJson = JsonSerializer.Serialize(dataToStore);
             File.WriteAllBytes(tempPath, Encrypt(plainJson));
             break;
 
@@ -76,7 +97,7 @@ namespace DynamicBox.SaveManagement
             break;
 
           case StorageMethod.JSON:
-            string serializedData = JsonUtility.ToJson(dataToStore, true);
+            string serializedData = JsonSerializer.Serialize(dataToStore);
             File.WriteAllText(tempPath, serializedData);
             break;
         }
@@ -110,9 +131,9 @@ namespace DynamicBox.SaveManagement
             JsonEnvelope encEnvelope = new JsonEnvelope
             {
               version = version,
-              data = JsonUtility.ToJson(dataToStore, true)
+              data = JsonSerializer.Serialize(dataToStore)
             };
-            File.WriteAllBytes(tempPath, Encrypt(JsonUtility.ToJson(encEnvelope, true)));
+            File.WriteAllBytes(tempPath, Encrypt(JsonSerializer.Serialize(encEnvelope)));
             break;
 
           case StorageMethod.XML:
@@ -127,9 +148,9 @@ namespace DynamicBox.SaveManagement
             JsonEnvelope envelope = new JsonEnvelope
             {
               version = version,
-              data = JsonUtility.ToJson(dataToStore, true)
+              data = JsonSerializer.Serialize(dataToStore)
             };
-            File.WriteAllText(tempPath, JsonUtility.ToJson(envelope, true));
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(envelope));
             break;
         }
 
@@ -158,7 +179,7 @@ namespace DynamicBox.SaveManagement
         switch (_method)
         {
           case StorageMethod.Encrypted:
-            string plainJson = JsonUtility.ToJson(dataToStore, true);
+            string plainJson = JsonSerializer.Serialize(dataToStore);
             byte[] encryptedBytes = await Task.Run(() => Encrypt(plainJson), ct);
             using (FileStream fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
             {
@@ -178,7 +199,7 @@ namespace DynamicBox.SaveManagement
             break;
 
           case StorageMethod.JSON:
-            string serializedData = JsonUtility.ToJson(dataToStore, true);
+            string serializedData = JsonSerializer.Serialize(dataToStore);
             // StreamWriter.WriteAsync(string, CancellationToken) requires .NET 5+.
             // On .NET Standard 2.0 (Unity) we check before opening the stream; the write itself is not interruptible.
             ct.ThrowIfCancellationRequested();
@@ -236,7 +257,7 @@ namespace DynamicBox.SaveManagement
         {
           case StorageMethod.Encrypted:
             byte[] cipherData = File.ReadAllBytes(fileName);
-            storedData = JsonUtility.FromJson<T>(Decrypt(cipherData));
+            storedData = JsonSerializer.Deserialize<T>(Decrypt(cipherData));
             break;
 
           case StorageMethod.XML:
@@ -249,7 +270,7 @@ namespace DynamicBox.SaveManagement
 
           case StorageMethod.JSON:
             string serializedData = File.ReadAllText(fileName);
-            storedData = JsonUtility.FromJson<T>(serializedData);
+            storedData = JsonSerializer.Deserialize<T>(serializedData);
             break;
         }
       }
@@ -281,10 +302,10 @@ namespace DynamicBox.SaveManagement
         {
           case StorageMethod.Encrypted:
             byte[] cipherData = File.ReadAllBytes(fileName);
-            JsonEnvelope encEnvelope = JsonUtility.FromJson<JsonEnvelope>(Decrypt(cipherData));
+            JsonEnvelope encEnvelope = JsonSerializer.Deserialize<JsonEnvelope>(Decrypt(cipherData));
             if (encEnvelope.version != expectedVersion)
               return defaultValue;
-            return JsonUtility.FromJson<T>(encEnvelope.data);
+            return JsonSerializer.Deserialize<T>(encEnvelope.data);
 
           case StorageMethod.XML:
             using (FileStream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -296,10 +317,10 @@ namespace DynamicBox.SaveManagement
 
           case StorageMethod.JSON:
             string raw = File.ReadAllText(fileName);
-            JsonEnvelope jsonEnvelope = JsonUtility.FromJson<JsonEnvelope>(raw);
+            JsonEnvelope jsonEnvelope = JsonSerializer.Deserialize<JsonEnvelope>(raw);
             if (jsonEnvelope.version != expectedVersion)
               return defaultValue;
-            return JsonUtility.FromJson<T>(jsonEnvelope.data);
+            return JsonSerializer.Deserialize<T>(jsonEnvelope.data);
         }
       }
       catch (System.Exception ex)
@@ -335,7 +356,7 @@ namespace DynamicBox.SaveManagement
               await fs.ReadAsync(fileBytes, 0, fileBytes.Length, ct);
             }
             string decryptedJson = await Task.Run(() => Decrypt(fileBytes), ct);
-            return JsonUtility.FromJson<T>(decryptedJson);
+            return JsonSerializer.Deserialize<T>(decryptedJson);
 
           case StorageMethod.XML:
             return await Task.Run(() =>
@@ -356,7 +377,7 @@ namespace DynamicBox.SaveManagement
             {
               serializedData = await reader.ReadToEndAsync();
             }
-            return JsonUtility.FromJson<T>(serializedData);
+            return JsonSerializer.Deserialize<T>(serializedData);
         }
       }
       catch (OperationCanceledException)
@@ -391,7 +412,7 @@ namespace DynamicBox.SaveManagement
         switch (_method)
         {
           case StorageMethod.Encrypted:
-            storedData = JsonUtility.FromJson<T>(Decrypt(textAsset.bytes));
+            storedData = JsonSerializer.Deserialize<T>(Decrypt(textAsset.bytes));
             break;
 
           case StorageMethod.XML:
@@ -403,7 +424,7 @@ namespace DynamicBox.SaveManagement
             break;
 
           case StorageMethod.JSON:
-            storedData = JsonUtility.FromJson<T>(textAsset.text);
+            storedData = JsonSerializer.Deserialize<T>(textAsset.text);
             break;
         }
       }
