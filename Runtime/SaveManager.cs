@@ -1,24 +1,20 @@
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Xml.Serialization;
 using UnityEngine;
 
 namespace DynamicBox.SaveManagement
 {
   /// <summary>
-  /// Handles reading and writing persistent save data using Encrypted, XML, or JSON serialization.
-  /// All files are stored in <c>Application.persistentDataPath</c>.
+  /// Facade for reading and writing persistent save data.
+  /// Delegates serialization and I/O to an <see cref="IStorageStrategy"/> and slot
+  /// management to an internal <see cref="SlotManager"/>.
   /// Subscribe to <see cref="OnError"/> to handle failures without polling return values.
   /// </summary>
   public class SaveManager
   {
-    private readonly string _baseLocation;
-    private string _activeSlot;
-    private StorageMethod _method;
-    private string _encryptionKey;
+    private readonly IStorageStrategy _strategy;
+    private readonly SlotManager _slotManager;
 
     /// <summary>
     /// Fired whenever a save, load, or delete operation fails.
@@ -57,13 +53,33 @@ namespace DynamicBox.SaveManagement
     /// </param>
     public SaveManager(StorageMethod method, string encryptionKey = null)
     {
-      if (method == StorageMethod.Encrypted && string.IsNullOrEmpty(encryptionKey))
-        throw new System.ArgumentException(
-          "An encryption key must be provided when using StorageMethod.Encrypted.", nameof(encryptionKey));
+      switch (method)
+      {
+        case StorageMethod.Encrypted:
+          if (string.IsNullOrEmpty(encryptionKey))
+            throw new System.ArgumentException(
+              "An encryption key must be provided when using StorageMethod.Encrypted.", nameof(encryptionKey));
+          _strategy = new EncryptedStorageStrategy(encryptionKey);
+          break;
+        case StorageMethod.XML:
+          _strategy = new XmlStorageStrategy();
+          break;
+        default:
+          _strategy = new JsonStorageStrategy();
+          break;
+      }
+      _slotManager = new SlotManager(Application.persistentDataPath);
+    }
 
-      _baseLocation = Application.persistentDataPath;
-      _method = method;
-      _encryptionKey = encryptionKey;
+    /// <summary>
+    /// Creates a new SaveManager using a custom <see cref="IStorageStrategy"/>.
+    /// Use this overload to supply a format not covered by <see cref="StorageMethod"/>.
+    /// </summary>
+    /// <param name="strategy">The strategy that handles serialization and file I/O.</param>
+    public SaveManager(IStorageStrategy strategy)
+    {
+      _strategy = strategy ?? throw new System.ArgumentNullException(nameof(strategy));
+      _slotManager = new SlotManager(Application.persistentDataPath);
     }
 
     // -------------------------------------------------------------------------
@@ -74,7 +90,7 @@ namespace DynamicBox.SaveManagement
     /// The currently active slot name, or <c>null</c> if no slot is set.
     /// All file operations use this slot's subdirectory when set.
     /// </summary>
-    public string ActiveSlot => _activeSlot;
+    public string ActiveSlot => _slotManager.ActiveSlot;
 
     /// <summary>
     /// Activates a save slot. All subsequent file operations will read and write from
@@ -83,50 +99,25 @@ namespace DynamicBox.SaveManagement
     /// </summary>
     /// <param name="slotName">A unique name identifying the slot (e.g., "slot_1", "autosave").</param>
     /// <param name="label">Optional display label stored in the slot's metadata (e.g., "Chapter 3").</param>
-    public void SetSlot(string slotName, string label = null)
-    {
-      if (string.IsNullOrWhiteSpace(slotName))
-        throw new System.ArgumentException("Slot name cannot be null or whitespace.", nameof(slotName));
-      _activeSlot = slotName;
-      Directory.CreateDirectory(GetSaveDirectory());
-      if (label != null)
-        SetSlotLabel(label);
-    }
+    public void SetSlot(string slotName, string label = null) => _slotManager.SetSlot(slotName, label);
 
     /// <summary>
     /// Clears the active slot. File operations revert to <c>Application.persistentDataPath</c> directly.
     /// </summary>
-    public void ClearSlot() => _activeSlot = null;
+    public void ClearSlot() => _slotManager.ClearSlot();
 
     /// <summary>
     /// Updates the display label stored in the active slot's metadata.
     /// </summary>
     /// <param name="label">The label to store (e.g., "Chapter 3 - The Forest").</param>
     /// <exception cref="System.InvalidOperationException">Thrown when no slot is active.</exception>
-    public void SetSlotLabel(string label)
-    {
-      if (_activeSlot == null)
-        throw new System.InvalidOperationException("No active slot. Call SetSlot first.");
-      SaveSlotInfo info = ReadSlotMeta(_activeSlot) ?? new SaveSlotInfo { Name = _activeSlot };
-      info.Label = label;
-      WriteSlotMeta(info);
-    }
+    public void SetSlotLabel(string label) => _slotManager.SetSlotLabel(label);
 
     /// <summary>
     /// Returns metadata for all slot directories that exist under <c>Application.persistentDataPath</c>.
     /// Slots without a metadata file return a <see cref="SaveSlotInfo"/> with only <see cref="SaveSlotInfo.Name"/> populated.
     /// </summary>
-    public SaveSlotInfo[] ListSlots()
-    {
-      string[] dirs = Directory.GetDirectories(_baseLocation);
-      SaveSlotInfo[] slots = new SaveSlotInfo[dirs.Length];
-      for (int i = 0; i < dirs.Length; i++)
-      {
-        string name = Path.GetFileName(dirs[i]);
-        slots[i] = ReadSlotMeta(name) ?? new SaveSlotInfo { Name = name };
-      }
-      return slots;
-    }
+    public SaveSlotInfo[] ListSlots() => _slotManager.ListSlots();
 
     /// <summary>
     /// Deletes a slot directory and all save files within it.
@@ -136,10 +127,9 @@ namespace DynamicBox.SaveManagement
     /// <param name="slotName">The slot name to delete.</param>
     public void DeleteSlot(string slotName)
     {
-      string slotPath = Path.Combine(_baseLocation, slotName);
       try
       {
-        Directory.Delete(slotPath, true);
+        _slotManager.DeleteSlot(slotName);
       }
       catch (System.Exception ex)
       {
@@ -154,38 +144,14 @@ namespace DynamicBox.SaveManagement
     /// <summary>
     /// Serializes and saves <paramref name="dataToStore"/> to disk.
     /// </summary>
-    /// <param name="dataToStore">The object to save. Must be serializable in the chosen format.</param>
+    /// <param name="dataToStore">The object to save. Must be serializable by the active strategy.</param>
     /// <param name="dataName">File name without extension. Used to identify the save file.</param>
     public void SaveToFile<T>(T dataToStore, string dataName)
     {
-      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
-      string tempPath = fileName + ".tmp";
-
       try
       {
-        switch (_method)
-        {
-          case StorageMethod.Encrypted:
-            string plainJson = JsonSerializer.Serialize(dataToStore);
-            File.WriteAllBytes(tempPath, Encrypt(plainJson));
-            break;
-
-          case StorageMethod.XML:
-            XmlSerializer serializer = new XmlSerializer(typeof(T));
-            using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
-            {
-              serializer.Serialize(stream, dataToStore);
-            }
-            break;
-
-          case StorageMethod.JSON:
-            string serializedData = JsonSerializer.Serialize(dataToStore);
-            File.WriteAllText(tempPath, serializedData);
-            break;
-        }
-
-        CommitWrite(fileName);
-        if (_activeSlot != null) UpdateSlotMeta();
+        _strategy.Write(BuildFilePath(dataName), dataToStore);
+        if (_slotManager.ActiveSlot != null) _slotManager.UpdateSlotMeta();
       }
       catch (System.Exception ex)
       {
@@ -198,47 +164,15 @@ namespace DynamicBox.SaveManagement
     /// Use <see cref="LoadFromFile{T}(string,T,int)"/> to load — files saved with a version
     /// will be rejected on load if the version does not match.
     /// </summary>
-    /// <param name="dataToStore">The object to save. Must be serializable in the chosen format.</param>
+    /// <param name="dataToStore">The object to save. Must be serializable by the active strategy.</param>
     /// <param name="dataName">File name without extension. Used to identify the save file.</param>
     /// <param name="version">Schema version to stamp on this save file.</param>
     public void SaveToFile<T>(T dataToStore, string dataName, int version)
     {
-      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
-      string tempPath = fileName + ".tmp";
-
       try
       {
-        switch (_method)
-        {
-          case StorageMethod.Encrypted:
-            JsonEnvelope encEnvelope = new JsonEnvelope
-            {
-              version = version,
-              data = JsonSerializer.Serialize(dataToStore)
-            };
-            File.WriteAllBytes(tempPath, Encrypt(JsonSerializer.Serialize(encEnvelope)));
-            break;
-
-          case StorageMethod.XML:
-            XmlSerializer serializer = new XmlSerializer(typeof(SaveEnvelope<T>));
-            using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
-            {
-              serializer.Serialize(stream, new SaveEnvelope<T> { Version = version, Data = dataToStore });
-            }
-            break;
-
-          case StorageMethod.JSON:
-            JsonEnvelope envelope = new JsonEnvelope
-            {
-              version = version,
-              data = JsonSerializer.Serialize(dataToStore)
-            };
-            File.WriteAllText(tempPath, JsonSerializer.Serialize(envelope));
-            break;
-        }
-
-        CommitWrite(fileName);
-        if (_activeSlot != null) UpdateSlotMeta();
+        _strategy.WriteVersioned(BuildFilePath(dataName), dataToStore, version);
+        if (_slotManager.ActiveSlot != null) _slotManager.UpdateSlotMeta();
       }
       catch (System.Exception ex)
       {
@@ -247,55 +181,16 @@ namespace DynamicBox.SaveManagement
     }
 
     /// <summary>
-    /// Async version of <see cref="SaveToFile{T}(T,string)"/>. File I/O runs off the main thread.
-    /// Encrypted and XML serialization also runs off the main thread. JSON serialization remains
-    /// on the calling thread due to a Unity restriction on <c>JsonUtility</c>.
+    /// Async version of <see cref="SaveToFile{T}(T,string)"/>.
     /// </summary>
-    /// <param name="dataToStore">The object to save. Must be serializable in the chosen format.</param>
+    /// <param name="dataToStore">The object to save. Must be serializable by the active strategy.</param>
     /// <param name="dataName">File name without extension. Used to identify the save file.</param>
     public async Task SaveToFileAsync<T>(T dataToStore, string dataName, CancellationToken ct = default)
     {
-      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
-      string tempPath = fileName + ".tmp";
-
       try
       {
-        switch (_method)
-        {
-          case StorageMethod.Encrypted:
-            string plainJson = JsonSerializer.Serialize(dataToStore);
-            byte[] encryptedBytes = await Task.Run(() => Encrypt(plainJson), ct);
-            using (FileStream fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
-            {
-              await fs.WriteAsync(encryptedBytes, 0, encryptedBytes.Length, ct);
-            }
-            break;
-
-          case StorageMethod.XML:
-            await Task.Run(() =>
-            {
-              XmlSerializer serializer = new XmlSerializer(typeof(T));
-              using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
-              {
-                serializer.Serialize(stream, dataToStore);
-              }
-            }, ct);
-            break;
-
-          case StorageMethod.JSON:
-            string serializedData = JsonSerializer.Serialize(dataToStore);
-            // StreamWriter.WriteAsync(string, CancellationToken) requires .NET 5+.
-            // On .NET Standard 2.0 (Unity) we check before opening the stream; the write itself is not interruptible.
-            ct.ThrowIfCancellationRequested();
-            using (StreamWriter writer = new StreamWriter(tempPath, false))
-            {
-              await writer.WriteAsync(serializedData);
-            }
-            break;
-        }
-
-        CommitWrite(fileName);
-        if (_activeSlot != null) UpdateSlotMeta();
+        await _strategy.WriteAsync(BuildFilePath(dataName), dataToStore, ct);
+        if (_slotManager.ActiveSlot != null) _slotManager.UpdateSlotMeta();
       }
       catch (OperationCanceledException)
       {
@@ -315,58 +210,28 @@ namespace DynamicBox.SaveManagement
     /// Returns true if a save file with the given name exists on disk.
     /// Call this before loading to avoid triggering the error fallback for expected missing files.
     /// </summary>
-    /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFile{T}(T,string)"/>.</param>
-    public bool FileExists(string dataName)
-    {
-      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
-
-      return File.Exists(fileName);
-    }
+    /// <param name="dataName">File name without extension.</param>
+    public bool FileExists(string dataName) => File.Exists(BuildFilePath(dataName));
 
     /// <summary>
     /// Loads and deserializes a save file from disk.
     /// Returns <paramref name="defaultValue"/> if the file does not exist or cannot be read,
     /// and resets the file to <paramref name="defaultValue"/> so subsequent loads succeed.
     /// </summary>
-    /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFile{T}(T,string)"/>.</param>
+    /// <param name="dataName">File name without extension.</param>
     /// <param name="defaultValue">Returned and written to disk when loading fails.</param>
     public T LoadFromFile<T>(string dataName, T defaultValue)
     {
-      T storedData = defaultValue;
-
-      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
-
       try
       {
-        switch (_method)
-        {
-          case StorageMethod.Encrypted:
-            byte[] cipherData = File.ReadAllBytes(fileName);
-            storedData = JsonSerializer.Deserialize<T>(Decrypt(cipherData));
-            break;
-
-          case StorageMethod.XML:
-            using (FileStream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-            {
-              XmlSerializer serializer = new XmlSerializer(typeof(T));
-              storedData = (T) serializer.Deserialize(stream);
-            }
-            break;
-
-          case StorageMethod.JSON:
-            string serializedData = File.ReadAllText(fileName);
-            storedData = JsonSerializer.Deserialize<T>(serializedData);
-            break;
-        }
+        return _strategy.Read<T>(BuildFilePath(dataName));
       }
       catch (System.Exception ex)
       {
         RaiseError("File reading error: ", dataName, SaveOperation.Load, ex);
-        ResetData<T>(dataName, defaultValue);
-        storedData = defaultValue;
+        ResetData(dataName, defaultValue);
+        return defaultValue;
       }
-
-      return storedData;
     }
 
     /// <summary>
@@ -374,39 +239,18 @@ namespace DynamicBox.SaveManagement
     /// Returns <paramref name="defaultValue"/> if the file's version does not match
     /// <paramref name="expectedVersion"/>, allowing callers to handle stale saves cleanly.
     /// </summary>
-    /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFile{T}(T,string,int)"/>.</param>
+    /// <param name="dataName">File name without extension.</param>
     /// <param name="defaultValue">Returned when loading fails or the version does not match.</param>
     /// <param name="expectedVersion">The schema version this load call expects.</param>
     public T LoadFromFile<T>(string dataName, T defaultValue, int expectedVersion)
     {
-      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
-
       try
       {
-        switch (_method)
-        {
-          case StorageMethod.Encrypted:
-            byte[] cipherData = File.ReadAllBytes(fileName);
-            JsonEnvelope encEnvelope = JsonSerializer.Deserialize<JsonEnvelope>(Decrypt(cipherData));
-            if (encEnvelope.version != expectedVersion)
-              return defaultValue;
-            return JsonSerializer.Deserialize<T>(encEnvelope.data);
-
-          case StorageMethod.XML:
-            using (FileStream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-            {
-              XmlSerializer serializer = new XmlSerializer(typeof(SaveEnvelope<T>));
-              SaveEnvelope<T> envelope = (SaveEnvelope<T>) serializer.Deserialize(stream);
-              return envelope.Version == expectedVersion ? envelope.Data : defaultValue;
-            }
-
-          case StorageMethod.JSON:
-            string raw = File.ReadAllText(fileName);
-            JsonEnvelope jsonEnvelope = JsonSerializer.Deserialize<JsonEnvelope>(raw);
-            if (jsonEnvelope.version != expectedVersion)
-              return defaultValue;
-            return JsonSerializer.Deserialize<T>(jsonEnvelope.data);
-        }
+        return _strategy.ReadVersioned<T>(BuildFilePath(dataName), expectedVersion);
+      }
+      catch (VersionMismatchException)
+      {
+        return defaultValue;
       }
       catch (System.Exception ex)
       {
@@ -414,56 +258,18 @@ namespace DynamicBox.SaveManagement
         SaveToFile(defaultValue, dataName, expectedVersion);
         return defaultValue;
       }
-
-      return defaultValue;
     }
 
     /// <summary>
-    /// Async version of <see cref="LoadFromFile{T}(string,T)"/>. File I/O runs off the main thread.
-    /// Encrypted decryption also runs off the main thread. JSON deserialization remains on the
-    /// calling thread due to a Unity restriction on <c>JsonUtility</c>.
+    /// Async version of <see cref="LoadFromFile{T}(string,T)"/>.
     /// </summary>
-    /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFileAsync{T}"/>.</param>
+    /// <param name="dataName">File name without extension.</param>
     /// <param name="defaultValue">Returned and written to disk when loading fails.</param>
     public async Task<T> LoadFromFileAsync<T>(string dataName, T defaultValue, CancellationToken ct = default)
     {
-      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
-
       try
       {
-        switch (_method)
-        {
-          case StorageMethod.Encrypted:
-            byte[] fileBytes;
-            using (FileStream fs = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true))
-            {
-              fileBytes = new byte[fs.Length];
-              await fs.ReadAsync(fileBytes, 0, fileBytes.Length, ct);
-            }
-            string decryptedJson = await Task.Run(() => Decrypt(fileBytes), ct);
-            return JsonSerializer.Deserialize<T>(decryptedJson);
-
-          case StorageMethod.XML:
-            return await Task.Run(() =>
-            {
-              using (FileStream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-              {
-                XmlSerializer serializer = new XmlSerializer(typeof(T));
-                return (T) serializer.Deserialize(stream);
-              }
-            }, ct);
-
-          case StorageMethod.JSON:
-            // StreamReader.ReadToEndAsync(CancellationToken) requires .NET 5+.
-            // On .NET Standard 2.0 (Unity) we check before opening the stream; the read itself is not interruptible.
-            ct.ThrowIfCancellationRequested();
-            string serializedData;
-            using (StreamReader reader = new StreamReader(fileName))
-            {
-              serializedData = await reader.ReadToEndAsync();
-            }
-            return JsonSerializer.Deserialize<T>(serializedData);
-        }
+        return await _strategy.ReadAsync<T>(BuildFilePath(dataName), ct);
       }
       catch (OperationCanceledException)
       {
@@ -472,11 +278,9 @@ namespace DynamicBox.SaveManagement
       catch (System.Exception ex)
       {
         RaiseError("File reading error: ", dataName, SaveOperation.Load, ex);
-        await ResetDataAsync<T>(dataName, defaultValue);
+        await ResetDataAsync(dataName, defaultValue);
         return defaultValue;
       }
-
-      return defaultValue;
     }
 
     /// <summary>
@@ -488,37 +292,15 @@ namespace DynamicBox.SaveManagement
     /// <param name="resourcePath">Path relative to a Resources folder, without extension.</param>
     public T LoadFromResources<T>(string resourcePath)
     {
-      T storedData = default(T);
-
       try
       {
-        TextAsset textAsset = Resources.Load<TextAsset>(resourcePath);
-
-        switch (_method)
-        {
-          case StorageMethod.Encrypted:
-            storedData = JsonSerializer.Deserialize<T>(Decrypt(textAsset.bytes));
-            break;
-
-          case StorageMethod.XML:
-            using (System.IO.Stream stream = new System.IO.MemoryStream(textAsset.bytes))
-            {
-              XmlSerializer serializer = new XmlSerializer(typeof(T));
-              storedData = (T) serializer.Deserialize(stream);
-            }
-            break;
-
-          case StorageMethod.JSON:
-            storedData = JsonSerializer.Deserialize<T>(textAsset.text);
-            break;
-        }
+        return _strategy.ReadFromBytes<T>(Resources.Load<TextAsset>(resourcePath).bytes);
       }
       catch (System.Exception ex)
       {
         RaiseError("Resource reading error: ", resourcePath, SaveOperation.Load, ex);
+        return default;
       }
-
-      return storedData;
     }
 
     // -------------------------------------------------------------------------
@@ -532,7 +314,7 @@ namespace DynamicBox.SaveManagement
     /// </summary>
     public void RemoveData()
     {
-      string target = GetSaveDirectory();
+      string target = _slotManager.GetSaveDirectory();
       try
       {
         Directory.Delete(target, true);
@@ -546,15 +328,14 @@ namespace DynamicBox.SaveManagement
     /// <summary>
     /// Deletes a single save file by name.
     /// </summary>
-    /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFile{T}(T,string)"/>.</param>
+    /// <param name="dataName">File name without extension.</param>
     public void RemoveData(string dataName)
     {
-      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
-
+      string path = BuildFilePath(dataName);
       try
       {
-        File.Delete(fileName);
-        string backupPath = fileName + ".bak";
+        File.Delete(path);
+        string backupPath = path + ".bak";
         if (File.Exists(backupPath))
           File.Delete(backupPath);
       }
@@ -568,130 +349,19 @@ namespace DynamicBox.SaveManagement
     // Helpers
     // -------------------------------------------------------------------------
 
-    private string GetSaveDirectory() =>
-      _activeSlot != null ? Path.Combine(_baseLocation, _activeSlot) : _baseLocation;
+    private string BuildFilePath(string dataName) =>
+      Path.Combine(_slotManager.GetSaveDirectory(), dataName + "." + _strategy.FileExtension);
 
-    private void UpdateSlotMeta()
-    {
-      try
-      {
-        SaveSlotInfo info = ReadSlotMeta(_activeSlot) ?? new SaveSlotInfo { Name = _activeSlot };
-        info.LastModified = System.DateTime.UtcNow.ToString("O");
-        WriteSlotMeta(info);
-      }
-      catch (System.Exception ex)
-      {
-        Debug.LogWarning($"SaveManager: failed to update metadata for slot '{_activeSlot}': {ex.Message}");
-      }
-    }
+    private void ResetData<T>(string dataName, T defaultValue) => SaveToFile(defaultValue, dataName);
 
-    private SaveSlotInfo ReadSlotMeta(string slotName)
-    {
-      string metaPath = Path.Combine(_baseLocation, slotName, "slot.meta");
-      if (!File.Exists(metaPath))
-        return null;
-      try
-      {
-        return JsonSerializer.Deserialize<SaveSlotInfo>(File.ReadAllText(metaPath));
-      }
-      catch
-      {
-        return null;
-      }
-    }
-
-    private void WriteSlotMeta(SaveSlotInfo info)
-    {
-      string metaPath = Path.Combine(_baseLocation, info.Name, "slot.meta");
-      File.WriteAllText(metaPath, JsonSerializer.Serialize(info));
-    }
-
-    private static void CommitWrite(string targetPath)
-    {
-      string tempPath = targetPath + ".tmp";
-      string backupPath = targetPath + ".bak";
-
-      if (File.Exists(targetPath))
-      {
-        if (File.Exists(backupPath))
-          File.Delete(backupPath);
-        File.Move(targetPath, backupPath);
-      }
-
-      File.Move(tempPath, targetPath);
-    }
-
-    private void ResetData<T>(string dataName, T defaultValue)
-    {
-      SaveToFile(defaultValue, dataName);
-    }
-
-    private async Task ResetDataAsync<T>(string dataName, T defaultValue)
-    {
+    private async Task ResetDataAsync<T>(string dataName, T defaultValue) =>
       await SaveToFileAsync(defaultValue, dataName);
-    }
 
     private void RaiseError(string message, string dataName, SaveOperation operation, System.Exception ex)
     {
       SaveManagerException saveEx = new SaveManagerException(message + ex.Message, dataName, operation, ex);
       Debug.LogWarning(saveEx.Message);
       OnError?.Invoke(saveEx);
-    }
-
-    private byte[] Encrypt(string plainText)
-    {
-      using (Aes aes = Aes.Create())
-      {
-        aes.Key = DeriveKey(_encryptionKey);
-        aes.GenerateIV();
-
-        using (MemoryStream ms = new MemoryStream())
-        {
-          ms.Write(aes.IV, 0, aes.IV.Length);
-          using (CryptoStream cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
-          using (StreamWriter sw = new StreamWriter(cs))
-          {
-            sw.Write(plainText);
-          }
-          return ms.ToArray();
-        }
-      }
-    }
-
-    private string Decrypt(byte[] cipherData)
-    {
-      using (Aes aes = Aes.Create())
-      {
-        aes.Key = DeriveKey(_encryptionKey);
-
-        byte[] iv = new byte[16];
-        System.Array.Copy(cipherData, 0, iv, 0, 16);
-        aes.IV = iv;
-
-        using (MemoryStream ms = new MemoryStream(cipherData, 16, cipherData.Length - 16))
-        using (CryptoStream cs = new CryptoStream(ms, aes.CreateDecryptor(), CryptoStreamMode.Read))
-        using (StreamReader sr = new StreamReader(cs))
-        {
-          return sr.ReadToEnd();
-        }
-      }
-    }
-
-    private byte[] DeriveKey(string key)
-    {
-      using (SHA256 sha = SHA256.Create())
-      {
-        return sha.ComputeHash(Encoding.UTF8.GetBytes(key));
-      }
-    }
-
-    // Used internally for JSON and Encrypted versioning. JsonUtility cannot serialize
-    // open generic types, so T is serialized separately and stored as a string.
-    [System.Serializable]
-    private class JsonEnvelope
-    {
-      public int version;
-      public string data;
     }
   }
 }
