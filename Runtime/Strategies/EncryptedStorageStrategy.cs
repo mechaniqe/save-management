@@ -38,12 +38,7 @@ namespace DynamicBox.SaveManagement
     /// <inheritdoc/>
     public override void WriteVersioned<T>(string path, T data, int version)
     {
-      JsonEnvelope envelope = new JsonEnvelope
-      {
-        version = version,
-        data = SaveManager.JsonSerializer.Serialize(data)
-      };
-      File.WriteAllBytes(path + ".tmp", Encrypt(SaveManager.JsonSerializer.Serialize(envelope)));
+      File.WriteAllBytes(path + ".tmp", Encrypt(JsonEnvelopeHelper.SerializeVersionedEnvelope(data, version)));
       CommitWrite(path);
     }
 
@@ -54,13 +49,8 @@ namespace DynamicBox.SaveManagement
     }
 
     /// <inheritdoc/>
-    public override T ReadVersioned<T>(string path, int expectedVersion)
-    {
-      JsonEnvelope envelope = SaveManager.JsonSerializer.Deserialize<JsonEnvelope>(Decrypt(File.ReadAllBytes(path)));
-      if (envelope.version != expectedVersion)
-        throw new VersionMismatchException();
-      return SaveManager.JsonSerializer.Deserialize<T>(envelope.data);
-    }
+    public override T ReadVersioned<T>(string path, int expectedVersion) =>
+      JsonEnvelopeHelper.DeserializeVersionedPayload<T>(Decrypt(File.ReadAllBytes(path)), expectedVersion);
 
     /// <inheritdoc/>
     public override async Task WriteAsync<T>(string path, T data, CancellationToken ct)
