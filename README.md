@@ -104,7 +104,7 @@ saveManager.SetSlot("slot_1", label: "Chapter 3 - The Forest");
 // All saves/loads now go to slot_1/
 saveManager.SaveToFile(player, "player");
 
-// List available slots for a save-select screen
+// List registered slots for a save-select screen (ordered; see slots.registry.json)
 SaveSlotInfo[] slots = saveManager.ListSlots();
 foreach (var slot in slots)
   Debug.Log($"{slot.Name} — {slot.Label} — {slot.LastModified}");

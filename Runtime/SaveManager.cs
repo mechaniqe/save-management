@@ -100,8 +100,10 @@ namespace DynamicBox.SaveManagement
     public void SetSlotLabel(string label) => _slotManager.SetSlotLabel(label);
 
     /// <summary>
-    /// Returns metadata for all slot directories that exist under <c>Application.persistentDataPath</c>.
-    /// Slots without a metadata file return a <see cref="SaveSlotInfo"/> with only <see cref="SaveSlotInfo.Name"/> populated.
+    /// Returns metadata for each slot name listed in <c>slots.registry.json</c> at the root of
+    /// <c>Application.persistentDataPath</c>, in registry order. The registry is authoritative:
+    /// extra directories without a registry entry are ignored. Slots without a <c>slot.meta</c> file
+    /// return a <see cref="SaveSlotInfo"/> with only <see cref="SaveSlotInfo.Name"/> populated.
     /// </summary>
     public SaveSlotInfo[] ListSlots() => _slotManager.ListSlots();
 
