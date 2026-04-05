@@ -15,7 +15,8 @@ namespace DynamicBox.SaveManagement
   /// </summary>
   public class SaveManager
   {
-    private string _savingLocation;
+    private readonly string _baseLocation;
+    private string _activeSlot;
     private StorageMethod _method;
     private string _encryptionKey;
 
@@ -60,9 +61,90 @@ namespace DynamicBox.SaveManagement
         throw new System.ArgumentException(
           "An encryption key must be provided when using StorageMethod.Encrypted.", nameof(encryptionKey));
 
-      _savingLocation = Application.persistentDataPath;
+      _baseLocation = Application.persistentDataPath;
       _method = method;
       _encryptionKey = encryptionKey;
+    }
+
+    // -------------------------------------------------------------------------
+    // Slots
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The currently active slot name, or <c>null</c> if no slot is set.
+    /// All file operations use this slot's subdirectory when set.
+    /// </summary>
+    public string ActiveSlot => _activeSlot;
+
+    /// <summary>
+    /// Activates a save slot. All subsequent file operations will read and write from
+    /// a subdirectory named <paramref name="slotName"/> inside <c>Application.persistentDataPath</c>.
+    /// The directory is created if it does not exist.
+    /// </summary>
+    /// <param name="slotName">A unique name identifying the slot (e.g., "slot_1", "autosave").</param>
+    /// <param name="label">Optional display label stored in the slot's metadata (e.g., "Chapter 3").</param>
+    public void SetSlot(string slotName, string label = null)
+    {
+      if (string.IsNullOrWhiteSpace(slotName))
+        throw new System.ArgumentException("Slot name cannot be null or whitespace.", nameof(slotName));
+      _activeSlot = slotName;
+      Directory.CreateDirectory(GetSaveDirectory());
+      if (label != null)
+        SetSlotLabel(label);
+    }
+
+    /// <summary>
+    /// Clears the active slot. File operations revert to <c>Application.persistentDataPath</c> directly.
+    /// </summary>
+    public void ClearSlot() => _activeSlot = null;
+
+    /// <summary>
+    /// Updates the display label stored in the active slot's metadata.
+    /// </summary>
+    /// <param name="label">The label to store (e.g., "Chapter 3 - The Forest").</param>
+    /// <exception cref="System.InvalidOperationException">Thrown when no slot is active.</exception>
+    public void SetSlotLabel(string label)
+    {
+      if (_activeSlot == null)
+        throw new System.InvalidOperationException("No active slot. Call SetSlot first.");
+      SaveSlotInfo info = ReadSlotMeta(_activeSlot) ?? new SaveSlotInfo { Name = _activeSlot };
+      info.Label = label;
+      WriteSlotMeta(info);
+    }
+
+    /// <summary>
+    /// Returns metadata for all slot directories that exist under <c>Application.persistentDataPath</c>.
+    /// Slots without a metadata file return a <see cref="SaveSlotInfo"/> with only <see cref="SaveSlotInfo.Name"/> populated.
+    /// </summary>
+    public SaveSlotInfo[] ListSlots()
+    {
+      string[] dirs = Directory.GetDirectories(_baseLocation);
+      SaveSlotInfo[] slots = new SaveSlotInfo[dirs.Length];
+      for (int i = 0; i < dirs.Length; i++)
+      {
+        string name = Path.GetFileName(dirs[i]);
+        slots[i] = ReadSlotMeta(name) ?? new SaveSlotInfo { Name = name };
+      }
+      return slots;
+    }
+
+    /// <summary>
+    /// Deletes a slot directory and all save files within it.
+    /// If the deleted slot is currently active, call <see cref="SetSlot"/> or <see cref="ClearSlot"/>
+    /// before saving again.
+    /// </summary>
+    /// <param name="slotName">The slot name to delete.</param>
+    public void DeleteSlot(string slotName)
+    {
+      string slotPath = Path.Combine(_baseLocation, slotName);
+      try
+      {
+        Directory.Delete(slotPath, true);
+      }
+      catch (System.Exception ex)
+      {
+        RaiseError("Slot deletion error: ", slotName, SaveOperation.Delete, ex);
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -76,7 +158,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="dataName">File name without extension. Used to identify the save file.</param>
     public void SaveToFile<T>(T dataToStore, string dataName)
     {
-      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
+      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
       string tempPath = fileName + ".tmp";
 
       try
@@ -103,6 +185,7 @@ namespace DynamicBox.SaveManagement
         }
 
         CommitWrite(fileName);
+        if (_activeSlot != null) UpdateSlotMeta();
       }
       catch (System.Exception ex)
       {
@@ -120,7 +203,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="version">Schema version to stamp on this save file.</param>
     public void SaveToFile<T>(T dataToStore, string dataName, int version)
     {
-      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
+      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
       string tempPath = fileName + ".tmp";
 
       try
@@ -155,6 +238,7 @@ namespace DynamicBox.SaveManagement
         }
 
         CommitWrite(fileName);
+        if (_activeSlot != null) UpdateSlotMeta();
       }
       catch (System.Exception ex)
       {
@@ -171,7 +255,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="dataName">File name without extension. Used to identify the save file.</param>
     public async Task SaveToFileAsync<T>(T dataToStore, string dataName, CancellationToken ct = default)
     {
-      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
+      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
       string tempPath = fileName + ".tmp";
 
       try
@@ -211,6 +295,7 @@ namespace DynamicBox.SaveManagement
         }
 
         CommitWrite(fileName);
+        if (_activeSlot != null) UpdateSlotMeta();
       }
       catch (OperationCanceledException)
       {
@@ -233,7 +318,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFile{T}(T,string)"/>.</param>
     public bool FileExists(string dataName)
     {
-      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
+      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
 
       return File.Exists(fileName);
     }
@@ -249,7 +334,7 @@ namespace DynamicBox.SaveManagement
     {
       T storedData = defaultValue;
 
-      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
+      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
 
       try
       {
@@ -294,7 +379,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="expectedVersion">The schema version this load call expects.</param>
     public T LoadFromFile<T>(string dataName, T defaultValue, int expectedVersion)
     {
-      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
+      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
 
       try
       {
@@ -342,7 +427,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="defaultValue">Returned and written to disk when loading fails.</param>
     public async Task<T> LoadFromFileAsync<T>(string dataName, T defaultValue, CancellationToken ct = default)
     {
-      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
+      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
 
       try
       {
@@ -441,17 +526,20 @@ namespace DynamicBox.SaveManagement
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Deletes the entire persistent data directory. All save files will be lost.
+    /// Deletes the active slot directory (if a slot is set) or the entire persistent data directory.
+    /// All save files within the target directory will be lost.
+    /// If the active slot is deleted, call <see cref="SetSlot"/> or <see cref="ClearSlot"/> before saving again.
     /// </summary>
     public void RemoveData()
     {
+      string target = GetSaveDirectory();
       try
       {
-        Directory.Delete(_savingLocation, true);
+        Directory.Delete(target, true);
       }
       catch (System.Exception ex)
       {
-        RaiseError("Directory deletion error: ", _savingLocation, SaveOperation.Delete, ex);
+        RaiseError("Directory deletion error: ", target, SaveOperation.Delete, ex);
       }
     }
 
@@ -461,7 +549,7 @@ namespace DynamicBox.SaveManagement
     /// <param name="dataName">File name without extension, matching what was used in <see cref="SaveToFile{T}(T,string)"/>.</param>
     public void RemoveData(string dataName)
     {
-      string fileName = Path.Combine(_savingLocation, dataName + "." + _method.ToString().ToLower());
+      string fileName = Path.Combine(GetSaveDirectory(),dataName + "." + _method.ToString().ToLower());
 
       try
       {
@@ -479,6 +567,44 @@ namespace DynamicBox.SaveManagement
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    private string GetSaveDirectory() =>
+      _activeSlot != null ? Path.Combine(_baseLocation, _activeSlot) : _baseLocation;
+
+    private void UpdateSlotMeta()
+    {
+      try
+      {
+        SaveSlotInfo info = ReadSlotMeta(_activeSlot) ?? new SaveSlotInfo { Name = _activeSlot };
+        info.LastModified = System.DateTime.UtcNow.ToString("O");
+        WriteSlotMeta(info);
+      }
+      catch (System.Exception ex)
+      {
+        Debug.LogWarning($"SaveManager: failed to update metadata for slot '{_activeSlot}': {ex.Message}");
+      }
+    }
+
+    private SaveSlotInfo ReadSlotMeta(string slotName)
+    {
+      string metaPath = Path.Combine(_baseLocation, slotName, "slot.meta");
+      if (!File.Exists(metaPath))
+        return null;
+      try
+      {
+        return JsonSerializer.Deserialize<SaveSlotInfo>(File.ReadAllText(metaPath));
+      }
+      catch
+      {
+        return null;
+      }
+    }
+
+    private void WriteSlotMeta(SaveSlotInfo info)
+    {
+      string metaPath = Path.Combine(_baseLocation, info.Name, "slot.meta");
+      File.WriteAllText(metaPath, JsonSerializer.Serialize(info));
+    }
 
     private static void CommitWrite(string targetPath)
     {
