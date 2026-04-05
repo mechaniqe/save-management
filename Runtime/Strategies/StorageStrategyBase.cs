@@ -46,19 +46,6 @@ namespace DynamicBox.SaveManagement
     /// target to <c>path + ".bak"</c> first. Call this after all writes to the temp file are done.
     /// </summary>
     /// <param name="targetPath">The final destination path (not the temp path).</param>
-    protected static void CommitWrite(string targetPath)
-    {
-      string tempPath = targetPath + ".tmp";
-      string backupPath = targetPath + ".bak";
-
-      if (File.Exists(targetPath))
-      {
-        if (File.Exists(backupPath))
-          File.Delete(backupPath);
-        File.Move(targetPath, backupPath);
-      }
-
-      File.Move(tempPath, targetPath);
-    }
+    protected static void CommitWrite(string targetPath) => AtomicFileCommit.Apply(targetPath);
   }
 }

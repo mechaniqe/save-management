@@ -259,21 +259,8 @@ namespace DynamicBox.SaveManagement
       reg.version = reg.version <= 0 ? 1 : reg.version;
       reg.slots = EntriesFromNames(DeduplicatePreserveOrder(SlotNamesFromEntries(reg.slots)));
       string json = _jsonSerializer.Serialize(reg);
-      string tempPath = _registryPath + ".tmp";
-      File.WriteAllText(tempPath, json);
-      CommitRegistryWrite(_registryPath, tempPath);
-    }
-
-    private static void CommitRegistryWrite(string targetPath, string tempPath)
-    {
-      string backupPath = targetPath + ".bak";
-      if (File.Exists(targetPath))
-      {
-        if (File.Exists(backupPath))
-          File.Delete(backupPath);
-        File.Move(targetPath, backupPath);
-      }
-      File.Move(tempPath, targetPath);
+      File.WriteAllText(_registryPath + ".tmp", json);
+      AtomicFileCommit.Apply(_registryPath);
     }
   }
 }
