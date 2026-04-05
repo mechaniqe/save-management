@@ -14,6 +14,9 @@ namespace DynamicBox.SaveManagement
 
     internal string ActiveSlot => _activeSlot;
 
+    /// <summary>Root path passed at construction (typically <c>Application.persistentDataPath</c>).</summary>
+    internal string PersistentDataRoot => _baseLocation;
+
     internal SlotManager(string baseLocation)
     {
       _baseLocation = baseLocation;

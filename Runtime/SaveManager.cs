@@ -296,13 +296,28 @@ namespace DynamicBox.SaveManagement
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Deletes the active slot directory (if a slot is set) or the entire persistent data directory.
-    /// All save files within the target directory will be lost.
-    /// If the active slot is deleted, call <see cref="SetSlot"/> or <see cref="ClearSlot"/> before saving again.
+    /// Deletes the active slot's directory and everything inside it. Requires an active slot — it will not
+    /// delete <c>Application.persistentDataPath</c> when no slot is set (use <see cref="RemovePersistentDataRoot"/> for that).
+    /// If you remove the active slot folder, call <see cref="SetSlot"/> or <see cref="ClearSlot"/> before saving again.
     /// </summary>
+    /// <exception cref="System.InvalidOperationException">Thrown when no slot is active.</exception>
     public void RemoveData()
     {
-      string target = _slotManager.GetSaveDirectory();
+      if (_slotManager.ActiveSlot == null)
+        throw new System.InvalidOperationException(
+          "RemoveData() requires an active save slot. Call SetSlot(...) first, or use RemovePersistentDataRoot() only if you intend to delete the entire persistent data directory.");
+
+      DeleteSlot(_slotManager.ActiveSlot);
+    }
+
+    /// <summary>
+    /// Deletes <c>Application.persistentDataPath</c> recursively — all slots, the slot registry, and any
+    /// other files stored under that root. This is intentionally separate from <see cref="RemoveData()"/>
+    /// to avoid accidental wipes when no slot is active.
+    /// </summary>
+    public void RemovePersistentDataRoot()
+    {
+      string target = _slotManager.PersistentDataRoot;
       try
       {
         Directory.Delete(target, true);
