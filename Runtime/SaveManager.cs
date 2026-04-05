@@ -276,13 +276,26 @@ namespace DynamicBox.SaveManagement
     /// Useful for shipping default data with the game. The file must be a <c>TextAsset</c>.
     /// When using <see cref="StorageMethod.Encrypted"/>, the asset must have been encrypted
     /// with the same key provided to this SaveManager.
+    /// If nothing is found at <paramref name="resourcePath"/>, <c>OnError</c> is notified and
+    /// <c>default</c> is returned (no exception thrown).
     /// </summary>
     /// <param name="resourcePath">Path relative to a Resources folder, without extension.</param>
     public T LoadFromResources<T>(string resourcePath)
     {
       try
       {
-        return _strategy.ReadFromBytes<T>(Resources.Load<TextAsset>(resourcePath).bytes);
+        TextAsset asset = Resources.Load<TextAsset>(resourcePath);
+        if (asset == null)
+        {
+          RaiseError(
+            "Resource reading error: ",
+            resourcePath,
+            SaveOperation.Load,
+            new System.InvalidOperationException(
+              $"No TextAsset at Resources path '{resourcePath}'. Use a path under a Resources folder and omit the file extension."));
+          return default;
+        }
+        return _strategy.ReadFromBytes<T>(asset.bytes);
       }
       catch (System.Exception ex)
       {
