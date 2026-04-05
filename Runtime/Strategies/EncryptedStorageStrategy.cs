@@ -18,7 +18,11 @@ namespace DynamicBox.SaveManagement
     /// Any string. Hashed to a fixed key size internally.
     /// Must remain consistent between saves and loads — changing it makes existing saves unreadable.
     /// </param>
-    public EncryptedStorageStrategy(string encryptionKey)
+    /// <param name="jsonSerializer">
+    /// Serializer for JSON before encryption. If null, <see cref="SaveManager.JsonSerializer"/> is used.
+    /// </param>
+    public EncryptedStorageStrategy(string encryptionKey, IJsonSerializer jsonSerializer = null)
+      : base(jsonSerializer ?? SaveManager.JsonSerializer)
     {
       if (string.IsNullOrEmpty(encryptionKey))
         throw new System.ArgumentException("Encryption key cannot be null or empty.", nameof(encryptionKey));

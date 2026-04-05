@@ -5,15 +5,23 @@ namespace DynamicBox.SaveManagement
 {
   /// <summary>
   /// Base class for strategies that persist data as JSON on disk (plain text or encrypted bytes).
-  /// Uses <see cref="SaveManager.JsonSerializer"/> and <see cref="JsonEnvelopeHelper"/> for payloads;
+  /// Uses the supplied <see cref="IJsonSerializer"/> and <see cref="JsonEnvelopeHelper"/> for payloads;
   /// subclasses define how the JSON string is encoded for storage and decoded back.
   /// </summary>
   public abstract class JsonStorageStrategyBase : StorageStrategyBase
   {
+    private readonly IJsonSerializer _jsonSerializer;
+
+    /// <param name="jsonSerializer">Serializer for JSON payloads. Must not be null.</param>
+    protected JsonStorageStrategyBase(IJsonSerializer jsonSerializer)
+    {
+      _jsonSerializer = jsonSerializer ?? throw new System.ArgumentNullException(nameof(jsonSerializer));
+    }
+
     /// <inheritdoc/>
     public override void Write<T>(string path, T data)
     {
-      string json = SaveManager.JsonSerializer.Serialize(data);
+      string json = _jsonSerializer.Serialize(data);
       WriteJsonToTemp(path, json);
       CommitWrite(path);
     }
@@ -21,7 +29,7 @@ namespace DynamicBox.SaveManagement
     /// <inheritdoc/>
     public override void WriteVersioned<T>(string path, T data, int version)
     {
-      string json = JsonEnvelopeHelper.SerializeVersionedEnvelope(data, version);
+      string json = JsonEnvelopeHelper.SerializeVersionedEnvelope(_jsonSerializer, data, version);
       WriteJsonToTemp(path, json);
       CommitWrite(path);
     }
@@ -30,17 +38,17 @@ namespace DynamicBox.SaveManagement
     public override T Read<T>(string path)
     {
       string json = ReadJsonFromFile(path);
-      return SaveManager.JsonSerializer.Deserialize<T>(json);
+      return _jsonSerializer.Deserialize<T>(json);
     }
 
     /// <inheritdoc/>
     public override T ReadVersioned<T>(string path, int expectedVersion) =>
-      JsonEnvelopeHelper.DeserializeVersionedPayload<T>(ReadJsonFromFile(path), expectedVersion);
+      JsonEnvelopeHelper.DeserializeVersionedPayload<T>(_jsonSerializer, ReadJsonFromFile(path), expectedVersion);
 
     /// <inheritdoc/>
     public override async Task WriteAsync<T>(string path, T data, CancellationToken ct)
     {
-      string json = SaveManager.JsonSerializer.Serialize(data);
+      string json = _jsonSerializer.Serialize(data);
       await WriteJsonToTempAsync(path, json, ct);
       CommitWrite(path);
     }
@@ -49,12 +57,12 @@ namespace DynamicBox.SaveManagement
     public override async Task<T> ReadAsync<T>(string path, CancellationToken ct)
     {
       string json = await ReadJsonFromFileAsync(path, ct);
-      return SaveManager.JsonSerializer.Deserialize<T>(json);
+      return _jsonSerializer.Deserialize<T>(json);
     }
 
     /// <inheritdoc/>
     public override T ReadFromBytes<T>(byte[] rawBytes) =>
-      SaveManager.JsonSerializer.Deserialize<T>(ReadJsonFromBytes(rawBytes));
+      _jsonSerializer.Deserialize<T>(ReadJsonFromBytes(rawBytes));
 
     /// <summary>
     /// Writes <paramref name="json"/> to <c>path + ".tmp"</c> using this strategy's encoding.

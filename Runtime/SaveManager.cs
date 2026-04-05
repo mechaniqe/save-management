@@ -15,6 +15,13 @@ namespace DynamicBox.SaveManagement
   {
     private readonly IStorageStrategy _strategy;
     private readonly SlotManager _slotManager;
+    private readonly IJsonSerializer _jsonSerializer;
+
+    /// <summary>
+    /// The <see cref="IJsonSerializer"/> used by this instance for slot registry and metadata,
+    /// and for JSON / encrypted save files when using the built-in strategies.
+    /// </summary>
+    public IJsonSerializer Serializer => _jsonSerializer;
 
     /// <summary>
     /// Fired whenever a save, load, or delete operation fails.
@@ -22,24 +29,25 @@ namespace DynamicBox.SaveManagement
     /// </summary>
     public event System.Action<SaveManagerException> OnError;
 
-    private static IJsonSerializer _jsonSerializer = new JsonUtilitySerializer();
-    private static bool _jsonSerializerAssigned;
+    private static IJsonSerializer _defaultJsonSerializer = new JsonUtilitySerializer();
+    private static bool _defaultJsonSerializerAssigned;
 
     /// <summary>
-    /// The JSON serializer used by all <see cref="SaveManager"/> instances.
-    /// Defaults to <see cref="JsonUtilitySerializer"/>. Set this once at startup,
-    /// before any save or load operations are performed.
+    /// Default JSON serializer used when a <see cref="SaveManager"/> is constructed without an explicit
+    /// <see cref="IJsonSerializer"/> and when <see cref="JsonStorageStrategy"/> / <see cref="EncryptedStorageStrategy"/>
+    /// are created without one. Defaults to <see cref="JsonUtilitySerializer"/>. Set once at startup before saves,
+    /// or pass a serializer into <see cref="SaveManager(StorageMethod,string,IJsonSerializer)"/> per instance.
     /// Reassigning after saves exist on disk may make those saves unreadable with the new serializer.
     /// </summary>
     public static IJsonSerializer JsonSerializer
     {
-      get => _jsonSerializer;
+      get => _defaultJsonSerializer;
       set
       {
-        if (_jsonSerializerAssigned)
+        if (_defaultJsonSerializerAssigned)
           Debug.LogWarning("SaveManager.JsonSerializer was changed after already being assigned. Saves written with the previous serializer may no longer be readable.");
-        _jsonSerializer = value ?? throw new System.ArgumentNullException(nameof(value));
-        _jsonSerializerAssigned = true;
+        _defaultJsonSerializer = value ?? throw new System.ArgumentNullException(nameof(value));
+        _defaultJsonSerializerAssigned = true;
       }
     }
 
@@ -51,10 +59,14 @@ namespace DynamicBox.SaveManagement
     /// Required when using <see cref="StorageMethod.Encrypted"/>. Any string length is accepted —
     /// the key is hashed to a fixed size internally. Keep this value consistent between saves and loads.
     /// </param>
-    public SaveManager(StorageMethod method, string encryptionKey = null)
+    /// <param name="jsonSerializer">
+    /// Serializer for slot metadata and JSON-based formats. If null, <see cref="JsonSerializer"/> (static default) is used.
+    /// </param>
+    public SaveManager(StorageMethod method, string encryptionKey = null, IJsonSerializer jsonSerializer = null)
     {
-      _strategy = StorageStrategyFactory.Create(method, encryptionKey);
-      _slotManager = new SlotManager(Application.persistentDataPath);
+      _jsonSerializer = jsonSerializer ?? JsonSerializer;
+      _strategy = StorageStrategyFactory.Create(method, encryptionKey, _jsonSerializer);
+      _slotManager = new SlotManager(Application.persistentDataPath, _jsonSerializer);
     }
 
     /// <summary>
@@ -62,10 +74,15 @@ namespace DynamicBox.SaveManagement
     /// Use this overload to supply a format not covered by <see cref="StorageMethod"/>.
     /// </summary>
     /// <param name="strategy">The strategy that handles serialization and file I/O.</param>
-    public SaveManager(IStorageStrategy strategy)
+    /// <param name="jsonSerializer">
+    /// Serializer for slot registry and <c>slot.meta</c> files. If null, <see cref="JsonSerializer"/> (static default) is used.
+    /// Use the same <see cref="IJsonSerializer"/> your JSON-based strategy was built with, if applicable.
+    /// </param>
+    public SaveManager(IStorageStrategy strategy, IJsonSerializer jsonSerializer = null)
     {
+      _jsonSerializer = jsonSerializer ?? JsonSerializer;
       _strategy = strategy ?? throw new System.ArgumentNullException(nameof(strategy));
-      _slotManager = new SlotManager(Application.persistentDataPath);
+      _slotManager = new SlotManager(Application.persistentDataPath, _jsonSerializer);
     }
 
     // -------------------------------------------------------------------------

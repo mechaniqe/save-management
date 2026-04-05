@@ -10,6 +10,7 @@ namespace DynamicBox.SaveManagement
 
     private readonly string _baseLocation;
     private readonly string _registryPath;
+    private readonly IJsonSerializer _jsonSerializer;
     private string _activeSlot;
 
     internal string ActiveSlot => _activeSlot;
@@ -17,10 +18,11 @@ namespace DynamicBox.SaveManagement
     /// <summary>Root path passed at construction (typically <c>Application.persistentDataPath</c>).</summary>
     internal string PersistentDataRoot => _baseLocation;
 
-    internal SlotManager(string baseLocation)
+    internal SlotManager(string baseLocation, IJsonSerializer jsonSerializer)
     {
       _baseLocation = baseLocation;
       _registryPath = Path.Combine(_baseLocation, RegistryFileName);
+      _jsonSerializer = jsonSerializer ?? throw new System.ArgumentNullException(nameof(jsonSerializer));
     }
 
     internal string GetSaveDirectory() =>
@@ -95,7 +97,7 @@ namespace DynamicBox.SaveManagement
         return null;
       try
       {
-        return SaveManager.JsonSerializer.Deserialize<SaveSlotInfo>(File.ReadAllText(metaPath));
+        return _jsonSerializer.Deserialize<SaveSlotInfo>(File.ReadAllText(metaPath));
       }
       catch
       {
@@ -107,7 +109,7 @@ namespace DynamicBox.SaveManagement
     {
       File.WriteAllText(
         Path.Combine(_baseLocation, info.Name, "slot.meta"),
-        SaveManager.JsonSerializer.Serialize(info));
+        _jsonSerializer.Serialize(info));
     }
 
     /// <summary>
@@ -162,7 +164,7 @@ namespace DynamicBox.SaveManagement
       try
       {
         string json = File.ReadAllText(_registryPath);
-        return SaveManager.JsonSerializer.Deserialize<SlotRegistryRoot>(json);
+        return _jsonSerializer.Deserialize<SlotRegistryRoot>(json);
       }
       catch
       {
@@ -256,7 +258,7 @@ namespace DynamicBox.SaveManagement
         reg = new SlotRegistryRoot { version = 1, slots = System.Array.Empty<SlotNameEntry>() };
       reg.version = reg.version <= 0 ? 1 : reg.version;
       reg.slots = EntriesFromNames(DeduplicatePreserveOrder(SlotNamesFromEntries(reg.slots)));
-      string json = SaveManager.JsonSerializer.Serialize(reg);
+      string json = _jsonSerializer.Serialize(reg);
       string tempPath = _registryPath + ".tmp";
       File.WriteAllText(tempPath, json);
       CommitRegistryWrite(_registryPath, tempPath);

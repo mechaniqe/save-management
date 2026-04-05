@@ -4,7 +4,7 @@ namespace DynamicBox.SaveManagement
   /// Authoritative ordered list of save slot directory names under persistent data.
   /// On disk as <c>slots.registry.json</c>; <see cref="SlotManager"/> is the only writer.
   /// Uses <see cref="SlotNameEntry"/> instead of <c>string[]</c> so Unity's <c>JsonUtility</c>
-  /// can round-trip the file when <see cref="SaveManager.JsonSerializer"/> is the default.
+  /// can round-trip the file when the active <see cref="IJsonSerializer"/> matches (e.g. <see cref="JsonUtilitySerializer"/>).
   /// </summary>
   [System.Serializable]
   internal class SlotRegistryRoot

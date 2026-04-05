@@ -7,10 +7,22 @@ namespace DynamicBox.SaveManagement
 {
   /// <summary>
   /// <see cref="IStorageStrategy"/> implementation that serializes data as plain JSON
-  /// using the configured <see cref="SaveManager.JsonSerializer"/>.
+  /// using the <see cref="IJsonSerializer"/> supplied at construction (or <see cref="SaveManager.JsonSerializer"/> when omitted).
   /// </summary>
   public class JsonStorageStrategy : JsonStorageStrategyBase
   {
+    /// <summary>
+    /// Uses <see cref="SaveManager.JsonSerializer"/> as the JSON serializer.
+    /// </summary>
+    public JsonStorageStrategy()
+      : this(null) { }
+
+    /// <summary>
+    /// <paramref name="jsonSerializer"/> if non-null; otherwise <see cref="SaveManager.JsonSerializer"/>.
+    /// </summary>
+    public JsonStorageStrategy(IJsonSerializer jsonSerializer)
+      : base(jsonSerializer ?? SaveManager.JsonSerializer) { }
+
     /// <inheritdoc/>
     public override string FileExtension => "json";
 

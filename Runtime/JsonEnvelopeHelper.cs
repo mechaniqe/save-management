@@ -7,22 +7,22 @@ namespace DynamicBox.SaveManagement
   /// </summary>
   internal static class JsonEnvelopeHelper
   {
-    internal static string SerializeVersionedEnvelope<T>(T data, int version)
+    internal static string SerializeVersionedEnvelope<T>(IJsonSerializer jsonSerializer, T data, int version)
     {
       JsonEnvelope envelope = new JsonEnvelope
       {
         version = version,
-        data = SaveManager.JsonSerializer.Serialize(data)
+        data = jsonSerializer.Serialize(data)
       };
-      return SaveManager.JsonSerializer.Serialize(envelope);
+      return jsonSerializer.Serialize(envelope);
     }
 
-    internal static T DeserializeVersionedPayload<T>(string envelopeJson, int expectedVersion)
+    internal static T DeserializeVersionedPayload<T>(IJsonSerializer jsonSerializer, string envelopeJson, int expectedVersion)
     {
-      JsonEnvelope envelope = SaveManager.JsonSerializer.Deserialize<JsonEnvelope>(envelopeJson);
+      JsonEnvelope envelope = jsonSerializer.Deserialize<JsonEnvelope>(envelopeJson);
       if (envelope.version != expectedVersion)
         throw new VersionMismatchException();
-      return SaveManager.JsonSerializer.Deserialize<T>(envelope.data);
+      return jsonSerializer.Deserialize<T>(envelope.data);
     }
   }
 }
