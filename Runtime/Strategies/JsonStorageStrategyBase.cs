@@ -49,14 +49,14 @@ namespace DynamicBox.SaveManagement
     public override async Task WriteAsync<T>(string path, T data, CancellationToken ct)
     {
       string json = _jsonSerializer.Serialize(data);
-      await WriteJsonToTempAsync(path, json, ct);
+      await WriteJsonToTempAsync(path, json, ct).ConfigureAwait(false);
       CommitWrite(path);
     }
 
     /// <inheritdoc/>
     public override async Task<T> ReadAsync<T>(string path, CancellationToken ct)
     {
-      string json = await ReadJsonFromFileAsync(path, ct);
+      string json = await ReadJsonFromFileAsync(path, ct).ConfigureAwait(false);
       return _jsonSerializer.Deserialize<T>(json);
     }
 
@@ -64,14 +64,14 @@ namespace DynamicBox.SaveManagement
     public override async Task WriteVersionedAsync<T>(string path, T data, int version, CancellationToken ct)
     {
       string json = JsonEnvelopeHelper.SerializeVersionedEnvelope(_jsonSerializer, data, version);
-      await WriteJsonToTempAsync(path, json, ct);
+      await WriteJsonToTempAsync(path, json, ct).ConfigureAwait(false);
       CommitWrite(path);
     }
 
     /// <inheritdoc/>
     public override async Task<T> ReadVersionedAsync<T>(string path, int expectedVersion, CancellationToken ct)
     {
-      string json = await ReadJsonFromFileAsync(path, ct);
+      string json = await ReadJsonFromFileAsync(path, ct).ConfigureAwait(false);
       return JsonEnvelopeHelper.DeserializeVersionedPayload<T>(_jsonSerializer, json, expectedVersion);
     }
 

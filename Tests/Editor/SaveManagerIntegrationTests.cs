@@ -137,8 +137,8 @@ namespace DynamicBox.SaveManagement.Tests.Editor
       public int Value;
     }
 
-    /// <summary>XmlSerializer-friendly payload (public properties).</summary>
-    private class XmlPayload
+    /// <summary>XmlSerializer requires a public type with a public parameterless ctor and public read/write properties.</summary>
+    public class XmlPayload
     {
       public int Value { get; set; }
     }

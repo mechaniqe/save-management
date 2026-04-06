@@ -205,7 +205,7 @@ namespace DynamicBox.SaveManagement
     {
       try
       {
-        await _strategy.WriteAsync(BuildFilePath(dataName), dataToStore, ct);
+        await _strategy.WriteAsync(BuildFilePath(dataName), dataToStore, ct).ConfigureAwait(false);
         if (_slotManager.ActiveSlot != null) _slotManager.UpdateSlotMeta();
       }
       catch (OperationCanceledException)
@@ -228,7 +228,7 @@ namespace DynamicBox.SaveManagement
     {
       try
       {
-        await _strategy.WriteVersionedAsync(BuildFilePath(dataName), dataToStore, version, ct);
+        await _strategy.WriteVersionedAsync(BuildFilePath(dataName), dataToStore, version, ct).ConfigureAwait(false);
         if (_slotManager.ActiveSlot != null) _slotManager.UpdateSlotMeta();
       }
       catch (OperationCanceledException)
@@ -308,7 +308,7 @@ namespace DynamicBox.SaveManagement
     {
       try
       {
-        return await _strategy.ReadAsync<T>(BuildFilePath(dataName), ct);
+        return await _strategy.ReadAsync<T>(BuildFilePath(dataName), ct).ConfigureAwait(false);
       }
       catch (OperationCanceledException)
       {
@@ -317,7 +317,7 @@ namespace DynamicBox.SaveManagement
       catch (System.Exception ex)
       {
         RaiseError("File reading error: ", dataName, SaveOperation.Load, ex);
-        await ResetDataAsync(dataName, defaultValue);
+        await ResetDataAsync(dataName, defaultValue).ConfigureAwait(false);
         return defaultValue;
       }
     }
@@ -332,7 +332,7 @@ namespace DynamicBox.SaveManagement
     {
       try
       {
-        return await _strategy.ReadVersionedAsync<T>(BuildFilePath(dataName), expectedVersion, ct);
+        return await _strategy.ReadVersionedAsync<T>(BuildFilePath(dataName), expectedVersion, ct).ConfigureAwait(false);
       }
       catch (VersionMismatchException)
       {
@@ -345,7 +345,7 @@ namespace DynamicBox.SaveManagement
       catch (System.Exception ex)
       {
         RaiseError("File reading error: ", dataName, SaveOperation.Load, ex);
-        await ResetDataVersionedAsync(dataName, defaultValue, expectedVersion, ct);
+        await ResetDataVersionedAsync(dataName, defaultValue, expectedVersion, ct).ConfigureAwait(false);
         return defaultValue;
       }
     }
@@ -450,10 +450,10 @@ namespace DynamicBox.SaveManagement
     private void ResetData<T>(string dataName, T defaultValue) => SaveToFile(defaultValue, dataName);
 
     private async Task ResetDataAsync<T>(string dataName, T defaultValue) =>
-      await SaveToFileAsync(defaultValue, dataName);
+      await SaveToFileAsync(defaultValue, dataName).ConfigureAwait(false);
 
     private async Task ResetDataVersionedAsync<T>(string dataName, T defaultValue, int expectedVersion, CancellationToken ct) =>
-      await SaveToFileAsync(defaultValue, dataName, expectedVersion, ct);
+      await SaveToFileAsync(defaultValue, dataName, expectedVersion, ct).ConfigureAwait(false);
 
     private void RaiseError(string message, string dataName, SaveOperation operation, System.Exception ex)
     {

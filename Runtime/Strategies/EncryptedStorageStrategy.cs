@@ -43,10 +43,10 @@ namespace DynamicBox.SaveManagement
     /// <inheritdoc cref="JsonStorageStrategyBase.WriteJsonToTempAsync"/>
     protected override async Task WriteJsonToTempAsync(string path, string json, CancellationToken ct)
     {
-      byte[] encryptedBytes = await Task.Run(() => Encrypt(json), ct);
+      byte[] encryptedBytes = await Task.Run(() => Encrypt(json), ct).ConfigureAwait(false);
       using (FileStream fs = new FileStream(path + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None, 4096, true))
       {
-        await fs.WriteAsync(encryptedBytes, 0, encryptedBytes.Length, ct);
+        await fs.WriteAsync(encryptedBytes, 0, encryptedBytes.Length, ct).ConfigureAwait(false);
       }
     }
 
@@ -57,9 +57,9 @@ namespace DynamicBox.SaveManagement
       using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true))
       {
         fileBytes = new byte[fs.Length];
-        await fs.ReadAsync(fileBytes, 0, fileBytes.Length, ct);
+        await fs.ReadAsync(fileBytes, 0, fileBytes.Length, ct).ConfigureAwait(false);
       }
-      return await Task.Run(() => Decrypt(fileBytes), ct);
+      return await Task.Run(() => Decrypt(fileBytes), ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc cref="JsonStorageStrategyBase.ReadJsonFromBytes"/>

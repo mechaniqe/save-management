@@ -41,7 +41,7 @@ namespace DynamicBox.SaveManagement
       ct.ThrowIfCancellationRequested();
       using (StreamWriter writer = new StreamWriter(path + ".tmp", false))
       {
-        await writer.WriteAsync(json);
+        await writer.WriteAsync(json).ConfigureAwait(false);
       }
     }
 
@@ -53,7 +53,7 @@ namespace DynamicBox.SaveManagement
       ct.ThrowIfCancellationRequested();
       using (StreamReader reader = new StreamReader(path))
       {
-        return await reader.ReadToEndAsync();
+        return await reader.ReadToEndAsync().ConfigureAwait(false);
       }
     }
 
