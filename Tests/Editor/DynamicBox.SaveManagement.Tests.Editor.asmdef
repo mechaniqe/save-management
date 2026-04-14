@@ -1,0 +1,12 @@
+{
+  "name": "DynamicBox.SaveManagement.Tests.Editor",
+  "rootNamespace": "DynamicBox.SaveManagement.Tests.Editor",
+  "references": [
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner",
+    "DynamicBox.SaveManagement"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ]
+}
